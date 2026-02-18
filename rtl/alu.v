@@ -55,12 +55,15 @@ module alu (
 
       // sra
       4'b1101:
+        result = $signed(op1) >>> op2[4:0];
 
       // slt
       4'b0010:
+        result = ($signed(op1) < $signed(op2)) ? 32'b1 : 32'b0;
 
       //sltu
       4'b0011:
+        result = (op1 < op2) ? 32'b1 : 32'b0;
 
       default:
         result = 32'b0;
