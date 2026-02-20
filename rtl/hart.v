@@ -131,6 +131,65 @@ module hart #(
 `endif
 );
     // Fill in your implementation here.
+
+	// PC wires
+	reg [31:0]] pc_reg;
+	wire [31:0] next_pc;
+	wire [31:0] pc_plus_4 = pc_reg + 32'd4;
+	wire [31:0] branch_target;
+
+	// instruction decoding wires
+	wire [31:0] inst = i_mem_rdata;
+	wire [6:0] opcode = inst[6:0];
+	wire [4:0] rd = inst[11:7];
+	wire [2:0] func3 = inst[14:12];
+	wire [4:0] rs1 = inst[19:15];
+	wire [4:0] rs2 = inst[24:20];
+	wire [6:0] func7 = inst[31:25];
+
+	// control unit wires 
+	wire alu_src, mem_to_reg, reg_write, mem_read, mem_write;
+	wire branch, jump, stop_sig;
+	wire [1:0] alu_op_type;
+	wire [3:0] alu_cmd;
+
+	// data wires 
+	wire [31:0] imm_val;
+	wire [31:0] rs1_data, rs2_data, writeback_data;
+	wire [31:0] alu_in_a, alu_in_b, alu_result;
+	wire alu_zero;
+
+	// branch and next pc logic
+	reg branch_taken;
+	always @(*) begin
+		if (branch) begin
+			case(func3)
+				3'b000: branch_taken = (rs1_data == rs2_data);  // beq
+				3'b001: branch_taken = (rs1_data != rs2_data);  // bne
+				3'b100: branch_taken = ($signed(rs1_data) < $signed(rs2_data));  // blt
+				3'b101: branch_taken = ($signed(rs1_data) >= $signed(rs2_data));  // bge
+				3'b110: branch_taken = (rs1_data < rs2_data);  // bltu
+				3'b111: branch_taken = (rs1_data >= rs2_data);  // bgeu
+				default: branch_taken = 1'b0;
+			endcase
+		end else begin
+			branch_taken = 1'b0;
+		end
+	end
+
+	wire [31:0] jump_target = (opcode == 7'b1100111) ? {alu_result[31:1], 1'b0} : (pc_reg + imm_val);
+	wire [31:0] next_pc = (jump || branch_taken) ? jump_target : pc_plus_4;
+
+	always @(posedge i_clk) begin
+		if (i_rst) begin
+			pc_reg <= RESET_ADDR;
+		end else if (!stop_sig) begin
+			pc_reg <= next_pc;
+		end
+	end
+
+	assign o_imem_raddr = pc_reg;
+	
 endmodule
 
 `default_nettype wire
