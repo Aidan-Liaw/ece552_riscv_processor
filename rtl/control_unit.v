@@ -4,16 +4,22 @@ module control_unit (
   input wire [6:0] opcode,
 
   // mux controls
-  output reg alu_src,      // 0 = reg, 1 = imm
-  output reg mem_to_reg,   // 0 = alu result, 1 = mem data
-  output reg reg_write,    // 1 = write too rd
-  output reg mem_read,     // 1 = read from mem
-  output reg mem_write,    // 1 = write to mem
+  output reg RegSignPropagation,
+  output reg RegReadSize,
+  output reg immFormat [5:0],
+  output reg pcAdd,
+  output reg memMask[3:0],
+  output reg registerWriteSel,
+  output reg aluSrc,      // 0 = reg, 1 = imm
+  output reg emtoReg,   // 0 = alu result, 1 = mem data
+  output reg regWrite,    // 1 = write too rd
+  output reg memRead,     // 1 = read from mem
+  output reg memWrite,    // 1 = write to mem
   output reg branch,       // 1 = branch instruction 
   output reg jump,         // 1 = jal or jalr
-  output reg stop,         // 1 = EBREAK, stop processor
-
-  output reg [1:0] alu_op_type  // 00 = add(mem), 01 = sub(branch), 10 = r-type, 11 = i-type
+  output reg halt,         // 1 = EBREAK, stop processor
+  output reg retire,
+  output reg [1:0] aluOP[3:0]
 );
 
   always @(*) begin
