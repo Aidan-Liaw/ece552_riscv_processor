@@ -149,7 +149,7 @@ module hart #(
 
 	// control unit wires 
 	wire alu_src, mem_to_reg, reg_write, mem_read, mem_write;
-	wire branch, jump, stop_sig;
+	wire branch, jump, halt_sig;
 	wire [1:0] alu_op_type;
 	wire [3:0] alu_cmd;
 
@@ -159,18 +159,25 @@ module hart #(
 	wire [31:0] alu_in_a, alu_in_b, alu_result;
 	wire alu_zero;
 
-	// branch and next pc logic
+	///// branch and next pc logic /////
 	reg branch_taken;
 	always @(*) begin
 		if (branch) begin
 			case(func3)
-				3'b000: branch_taken = (rs1_data == rs2_data);  // beq
-				3'b001: branch_taken = (rs1_data != rs2_data);  // bne
-				3'b100: branch_taken = ($signed(rs1_data) < $signed(rs2_data));  // blt
-				3'b101: branch_taken = ($signed(rs1_data) >= $signed(rs2_data));  // bge
-				3'b110: branch_taken = (rs1_data < rs2_data);  // bltu
-				3'b111: branch_taken = (rs1_data >= rs2_data);  // bgeu
-				default: branch_taken = 1'b0;
+				3'b000: 
+					branch_taken = (rs1_data == rs2_data);  // beq
+				3'b001: 
+					branch_taken = (rs1_data != rs2_data);  // bne
+				3'b100: 
+					branch_taken = ($signed(rs1_data) < $signed(rs2_data));  // blt
+				3'b101: 
+					branch_taken = ($signed(rs1_data) >= $signed(rs2_data));  // bge
+				3'b110: 
+					branch_taken = (rs1_data < rs2_data);  // bltu
+				3'b111: 
+					branch_taken = (rs1_data >= rs2_data);  // bgeu
+				default: 
+					branch_taken = 1'b0;
 			endcase
 		end else begin
 			branch_taken = 1'b0;
@@ -183,12 +190,144 @@ module hart #(
 	always @(posedge i_clk) begin
 		if (i_rst) begin
 			pc_reg <= RESET_ADDR;
-		end else if (!stop_sig) begin
+		end else if (!halt_sig) begin
 			pc_reg <= next_pc;
 		end
 	end
 
 	assign o_imem_raddr = pc_reg;
+
+	///// mem alignment logic /////
+	wire [1:0] addr_align = alu_result[1:0]
+
+	// mem outputs
+	assign o_dmem_addr = {alu_result[31:2], 2'b00};
+	assign o_dmem_ren = mem_read;
+	assign o_dmem_wen = mem_write;
+
+	reg [3:0] dmem_mask;
+	reg [31:0] dmem_wdata;
+
+	// write data alignment 
+	always @(*) begin
+		dmem_mask = 4'b0000;
+		dmem_wdata = 32'b0;
+
+		if (mem_write) begin
+			case(func3)
+				//sb
+				3'b000: begin
+					dmem_mask = 4'b0001 << addr_align;
+					dmem_wdata = {4{rs2_data[7:0]}};
+				end
+
+				// sh
+				3'b001: begin
+					dmem_mask = 4'b0011 << {addr_a;ign[1], 1'b0};
+					dmem_wdata = {2{rs2_data[15:0]}};
+				end
+
+				// sw 
+				3'b010: begin
+					dmem_mask = 4'b1111;
+					dmem_wdata = rs2_data;
+				end
+			endcase
+
+		end else if (mem_read) begin
+			case (func3)
+				// lb and lbu
+				3'b000, 3'b100:
+					dmem_mask = 4'b0001 << addr_align;
+				// lh and lhu
+				3'b001, 3'b101: 
+					dmem_mask = 4'b0011 << {addr_align[1], 1'b0};
+				// lw
+				3'b010:
+					dmem_mask = 4'b1111;
+			endcase
+		end
+	end
+
+	assign o_dmem_mask = dmem_mask;
+	assign o_dmem_wdata = dmem_wdata;
+
+	// read data alignment 
+	reg [31:0] mem_read_data;
+	wire [31:0] shifted_rdata = i_mem_rdata >> {addr_align, 3'b000};
+
+	always @(*) begin
+		case (func3)
+			// lb
+			3'b000:
+				mem_read_data = {{24{shifted_rdata[7]}}, shifted_rdata[7:0]};
+			// lbu
+			3'b100:
+				mem_read_data = {24'b0, sifted_rdata[7:0]};
+			// lh
+			3'b001: 
+				mem_read_data = {{16{shifted_rdata[15]}}, shifted_rdata[15:0]};
+			// lhu
+			3'b101:
+				mem_read_data = {16'b0, shifted_rdata[15:0]};
+			// lw
+			default:
+				mem_read_data = shifted_rdata;
+		endcase
+	end
+
+	///// modules /////
+	control_unit ctrl (
+		.opcode(opcode), .alu_src(alu_src), .mem_to_reg(mem_to_reg), .reg_write(reg_write), .mem_read(mem_read), 
+		.mem_write(mem_write), .branch(branch), .jump(jump), .halt(halt_sig), .alu_op_type(alu_op_type)
+	);
+
+	imm_gen ig (.inst(inst), .imm(imm_val));
+
+	regfile #( .BYPASS_EN(0) rf (
+		.clk(i_clk), .rst(i_rst), .read_reg1(rs1), .read_reg2(rs2), .write_reg(rd), .write_data(writeback_data),
+		.write_en(reg_write), .read_data1(rs1_data), .read_data2(rs2_data)
+	);
+
+	alu_control ac (
+		.alu_op_type(alu_op_type), .func3(func3), .bit30(inst[30]), .alu_cmd(alu_cmd)
+	);
+
+	// alu muxes 
+	assign alu_in_a = (opcode == 7'b0010111) ? pc_reg : rs1_data;
+	assign alu_in_b = (alu_src) ? imm_val : rs2_data;
+
+	alu arith_logic_unit (
+		.in_a(alu_in_a), .in_b(alu_in_b), .alu_op(alu_cmd), .result(alu_result), .zero(alu_zero)
+	);
+
+	// writeback mux 
+	assign writeback_data = (jump) ? pc_plus_4 :
+				  (mem_to_reg) ? mem_read_data :
+				  (opcode == 7'b0110111) ? imm_val :
+				  alu_result;
+
+	///// trap logic and retire interface /////
+	wire trap_unaligned_pc = (jump || branch_taken) && (jump_target[1:0] != 2'b00);
+	wire trap_unaligned_mem = (mem_read || em_write) &&
+			  ((func3 == 3'b010 && addr_align != 2'b00) ||
+			   ((func3 == 3'b001 || func3 == 3'b101) && addr_align[0] != 1'b0));
+
+	// illegal instruction check 
+	wire trap_illegal_inst = (inst[1:0] != 2'b11);
+
+	assign o_retire_valid = !i_rst && !halt_sig;
+	assign o_retire_inst = inst;
+	assign o_retire_halt = halt_sig;
+	assign o_retire_trap = trap_unaligned_pc || trap_unaligned_mem || trap_illegal_inst;
+	assign o_retire_rs1_raddr = rs1;
+	assign o_retire_rs2_raddr = rs2;
+	assign o_retire_rs1_rdata = rs1_data;
+	assign o_retire_rs2_rdata = rs2_data;
+	assign o_retire_rd_waddr = (reg_write) ? rd : 5'd0;
+	assign o_retire_rd_wdata = (reg_write) ? writeback_data : 32'd0;
+	assign o_retire_pc = pc_reg;
+	assign o_retire_next_pc = next_pc;
 	
 endmodule
 
