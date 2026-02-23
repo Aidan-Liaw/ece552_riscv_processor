@@ -53,31 +53,12 @@ module control_unit (
       end
 
       // i-type arithmetic
-<<<<<<< HEAD
-      7'b0010011: begin
-        regWrite = 1'b1;
-        aluSrc = 1'b1;
-        immFormat = 6'b000010;
-        registerWriteSel = 2'b00;
-        case (func3)
-            3'b000: aluOP = 3'b000; 
-            3'b001: aluOP = 3'b001; 
-            3'b010: aluOP = 3'b011;
-            3'b011: aluOP = 3'b011; 
-            3'b100: aluOP = 3'b100; 
-            3'b101: aluOP = 3'b101; 
-            3'b110: aluOP = 3'b110; 
-            3'b111: aluOP = 3'b111; 
-        endcase
-        //randomfdaoijf
-=======
       7'b001_0011: begin
         RegWriteEn = 1'b1;
         ALUSrc = 1'b1;
         ImmFormat = 6'b000010;
         RegisterWriteSel = 2'b00;
         ALUOp = funct3 == 3'b010 ? 3'b011 : funct3;
->>>>>>> 9019f1ee65676eafd3f443b080d66940b56628c1
       end
       
       // lui
@@ -85,7 +66,6 @@ module control_unit (
         RegWriteEn = 1'b1;
         ImmFormat = 6'b010000;
         RegisterWriteSel = 2'b10;
-        //        ALUSrc = 1'b1; // Why is this needed? We're not adding anything...
       end
 
       // auipc
