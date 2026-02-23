@@ -14,59 +14,71 @@
 `default_nettype wire
 
 module alu (
-  input wire [31:0] op1,
-  input wire [31:0] op2,
-  input wire [3:0] alu_op,
-  output reg [31:0] result,
-  outpute wire zero
+  input wire [31:0] i_op1,
+  input wire [31:0] i_op2,
+  input wire [5:0] i_opsel,
+  output wire [31:0] result,
+  output wire zero
 );
 
+  wire is_arith = i_opsel[5];
+  wire is_sub = i_opsel[4];
+  wire is_unsigned = i_opsel[3];
+  wire [2:0] alu_op = i_opsel[2:0];
+  
+  wire [31:0] ls_result;
+  wire [31:0] rs_result;
+  
+  reg result_reg;
+  
   assign zero = (result == 32'b0);
+  
+  assign result = result_reg;
+  
+  left_shifter ls (i_op1, i_op2[4:0], ls_result);
+  right_shifter rs (is_arith, i_op1, i_op2[4:0], rs_result);
 
   always @(*) begin
     case (alu_op)
-      // add
-      4'b0000:
-        result = op1 + op2;
-
-      // sub
-      4'b1000:
-        result = op1 - op2;
+      // add/sub
+      3'b000:
+        result_reg = is_sub == 1'b1 ? i_op1 - i_op2 : i_op1 + i_op2;
 
       // and
-      4'b0111:
-        result = op1 & op2;
+      3'b111:
+        result_reg = i_op1 & i_op2;
 
       // or
-      4'b0110:
-        result = op1 | op2;
+      3'b110:
+        result_reg = i_op1 | i_op2;
 
       // xor
-      4'b0100:
-        result = op1 ^ op2;
+      3'b100:
+        result_reg = i_op1 ^ i_op2;
 
       // sll
-      4'b0001:
-        result = op1 << op2[4:0];
+      3'b001:
+        result_reg = ls_result;
 
-      // srl
-      4'b0101:
-        result = op1 >> op2[4:0];
-
-      // sra
-      4'b1101:
-        result = $signed(op1) >>> op2[4:0];
+      // srl/sra
+      3'b101:
+        // Don't worry, the module checks and performs the appropriate right shift
+        result_reg = rs_result;
 
       // slt
-      4'b0010:
-        result = ($signed(op1) < $signed(op2)) ? 32'b1 : 32'b0;
+      3'b010:
+        // MSBit same means same sign, so check for magnitude
+        // Otherwise, MSBit of i_op1 will eliminate the remaining two options:
+        // i_op1, i_op2 = 1, 0 means i_op1 is smaller
+        // i_op1, i_op2 = 0, 1 means i_op1 is larger
+        result_reg = i_op1[31] == i_op2[31] ? i_op1[30:0] < i_op2[31:0] : i_op1[31] == 1'b1;
 
       //sltu
-      4'b0011:
-        result = (op1 < op2) ? 32'b1 : 32'b0;
+      3'b011:
+        result_reg = (i_op1 < i_op2) ? 32'b1 : 32'b0;
 
       default:
-        result = 32'b0;
+        result_reg = 32'b0;
     endcase
   end
 

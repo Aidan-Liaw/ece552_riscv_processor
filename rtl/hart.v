@@ -130,202 +130,195 @@ module hart #(
     ,`RVFI_OUTPUTS,
 `endif
 );
-    // Fill in your implementation here.
 
+  ////// VARIABLES
+  
 	// PC wires
-	reg [31:0]] pc_reg;
-	wire [31:0] next_pc;
-	wire [31:0] pc_plus_4 = pc_reg + 32'd4;
-	wire [31:0] branch_target;
+	reg  [31:0] pc_reg; // The PC register from the schematic
+	wire [31:0] next_pc; // The wire entering the PC register in the schemayoc
+	wire [31:0] pc_plus_4 = pc_reg + 32'd4; // The output wire of the adder for PC + 4
+	wire [31:0] branch_target; // 1 Usage in Find. ??????
 
 	// instruction decoding wires
-	wire [31:0] inst = i_mem_rdata;
-	wire [6:0] opcode = inst[6:0];
-	wire [4:0] rd = inst[11:7];
-	wire [2:0] func3 = inst[14:12];
-	wire [4:0] rs1 = inst[19:15];
-	wire [4:0] rs2 = inst[24:20];
-	wire [6:0] func7 = inst[31:25];
+	wire [31:0] inst   = i_imem_rdata;
+	wire [6:0]  opcode = inst[6:0];
+	wire [4:0]  rd     = inst[11:7];
+	wire [2:0]  funct3 = inst[14:12];
+	wire [4:0]  rs1    = inst[19:15];
+	wire [4:0]  rs2    = inst[24:20];
+	wire [6:0]  funct7 = inst[31:25];
 
-	// control unit wires 
-	wire alu_src, mem_to_reg, reg_write, mem_read, mem_write;
-	wire branch, jump, halt_sig;
-	wire [1:0] alu_op_type;
-	wire [3:0] alu_cmd;
+	//// Control Unit wires 
+	// Regiser File control
+	wire reg_sign_propagation;
+	wire [1:0] reg_read_size;
+	wire reg_write_en;
+  // Execute stage control
+  wire [5:0] imm_format;
+  wire pc_add; // 0 for rs1_data, 1 for PC
+  wire alu_src; // 0 for rs2_data, 1 for immediate
+  // Flow control
+  wire branch; // 0 for non-branch instructions, 1 for branch instructions
+	wire jump; // 0 for non-jump instructions, 1 for jump instructions
+	wire jalr_jump;
+	// Data Memory control
+	wire dmem_read_en;
+	wire dmem_write_en;
+	// Write Register input control
+	wire [3:0] dmem_mask;
+	wire [1:0] register_write_sel;
+	// Processor status control
+	wire halt; // Active-high
+	wire retire; // Active-high
+	// ALU control
+	wire [2:0] alu_op; // Operand setter for ALU Control module
+	
+	// ALU Control Signal
+  wire [5:0] alu_opsel;
 
-	// data wires 
-	wire [31:0] imm_val;
-	wire [31:0] rs1_data, rs2_data, writeback_data;
-	wire [31:0] alu_in_a, alu_in_b, alu_result;
-	wire alu_zero;
+	// Data wires 
+	wire [31:0] imm_val; // Output from Immediate Generation
+	wire [31:0] rs1_data, rs2_data; // Output from RF from registers' data
+	wire [31:0] writeback_data; // Data to write to Write Register
+	wire [31:0] alu_in_a, alu_in_b; // ALU inputs
+	wire [31:0] alu_result; // ALU result output
+	wire alu_branch, alu_zero; // ALU condition outputs
 
+
+  // LOGIC
+  
 	///// branch and next pc logic /////
-	reg branch_taken;
-	always @(*) begin
-		if (branch) begin
-			case(func3)
-				3'b000: 
-					branch_taken = (rs1_data == rs2_data);  // beq
-				3'b001: 
-					branch_taken = (rs1_data != rs2_data);  // bne
-				3'b100: 
-					branch_taken = ($signed(rs1_data) < $signed(rs2_data));  // blt
-				3'b101: 
-					branch_taken = ($signed(rs1_data) >= $signed(rs2_data));  // bge
-				3'b110: 
-					branch_taken = (rs1_data < rs2_data);  // bltu
-				3'b111: 
-					branch_taken = (rs1_data >= rs2_data);  // bgeu
-				default: 
-					branch_taken = 1'b0;
-			endcase
-		end else begin
-			branch_taken = 1'b0;
-		end
-	end
-
+  wire branch_taken;
+	branch_condition_checker branch_condition_checker(branch, funct3, rs1_data, rs2_data, branch_taken);
+  // IF opcode == 7'b1100111 THEN
+  //    jalr jump 
+  // ELSE 
+  //    jal jump 
+  // END IF
+  // Remember that 1b shift is done in Immediate Generator, so no need to do it here.
 	wire [31:0] jump_target = (opcode == 7'b1100111) ? {alu_result[31:1], 1'b0} : (pc_reg + imm_val);
-	wire [31:0] next_pc = (jump || branch_taken) ? jump_target : pc_plus_4;
-
+	// IF jump OR branch condition valid THEN
+	//   next_pc = jump_target
+	// ELSE
+	//   next_pc = pc_reg + 4
+	// END IF
+  // None of these logical operators are permitted.
+	// We will need to rewrite all of this as massive ternary statements
+	assign next_pc = (jump || branch_taken) ? jump_target : pc_plus_4;
+  // Changes PC on rising edge logic
 	always @(posedge i_clk) begin
 		if (i_rst) begin
 			pc_reg <= RESET_ADDR;
-		end else if (!halt_sig) begin
+		end else if (!halt) begin
 			pc_reg <= next_pc;
 		end
 	end
-
+  // Sets the I-Mem to the address whose instruction must be executed
+  // ZERO CYCLE LATENCY
 	assign o_imem_raddr = pc_reg;
 
 	///// mem alignment logic /////
-	wire [1:0] addr_align = alu_result[1:0]
+	wire [1:0] addr_align = alu_result[1:0];
 
 	// mem outputs
+	// In a real RV32-I, only the LSBit is 0'ed, but since we are no factoring in 
+	// the C or Zc* extenstions, this is fine
 	assign o_dmem_addr = {alu_result[31:2], 2'b00};
-	assign o_dmem_ren = mem_read;
-	assign o_dmem_wen = mem_write;
+	assign o_dmem_ren = dmem_read_en;
+	assign o_dmem_wen = dmem_write_en;
+	
+	wire [3:0]  write_dmem_mask;
+  wire [3:0]  read_dmem_mask;
+	wire [31:0] dmem_wdata;
+	wire [31:0] mem_read_data;
 
-	reg [3:0] dmem_mask;
-	reg [31:0] dmem_wdata;
+  write_data_aligner write_data_aligner(addr_align, dmem_write_en, 
+    funct3, rs2_data, write_dmem_mask, dmem_wdata);
+    
+    
+  read_data_aligner read_data_aligner(addr_align, dmem_read_en,
+    funct3, i_dmem_rdata, mem_read_data, read_dmem_mask);
 
-	// write data alignment 
-	always @(*) begin
-		dmem_mask = 4'b0000;
-		dmem_wdata = 32'b0;
-
-		if (mem_write) begin
-			case(func3)
-				//sb
-				3'b000: begin
-					dmem_mask = 4'b0001 << addr_align;
-					dmem_wdata = {4{rs2_data[7:0]}};
-				end
-
-				// sh
-				3'b001: begin
-					dmem_mask = 4'b0011 << {addr_a;ign[1], 1'b0};
-					dmem_wdata = {2{rs2_data[15:0]}};
-				end
-
-				// sw 
-				3'b010: begin
-					dmem_mask = 4'b1111;
-					dmem_wdata = rs2_data;
-				end
-			endcase
-
-		end else if (mem_read) begin
-			case (func3)
-				// lb and lbu
-				3'b000, 3'b100:
-					dmem_mask = 4'b0001 << addr_align;
-				// lh and lhu
-				3'b001, 3'b101: 
-					dmem_mask = 4'b0011 << {addr_align[1], 1'b0};
-				// lw
-				3'b010:
-					dmem_mask = 4'b1111;
-			endcase
-		end
-	end
-
-	assign o_dmem_mask = dmem_mask;
+  // If both dmem_write_en and read_dmem_mask hold true, the processor will trap
+  // and execution should stop, so this should be safe
+	assign o_dmem_mask = dmem_write_en == 1 ? write_dmem_mask : read_dmem_mask;
 	assign o_dmem_wdata = dmem_wdata;
-
-	// read data alignment 
-	reg [31:0] mem_read_data;
-	wire [31:0] shifted_rdata = i_mem_rdata >> {addr_align, 3'b000};
-
-	always @(*) begin
-		case (func3)
-			// lb
-			3'b000:
-				mem_read_data = {{24{shifted_rdata[7]}}, shifted_rdata[7:0]};
-			// lbu
-			3'b100:
-				mem_read_data = {24'b0, sifted_rdata[7:0]};
-			// lh
-			3'b001: 
-				mem_read_data = {{16{shifted_rdata[15]}}, shifted_rdata[15:0]};
-			// lhu
-			3'b101:
-				mem_read_data = {16'b0, shifted_rdata[15:0]};
-			// lw
-			default:
-				mem_read_data = shifted_rdata;
-		endcase
-	end
+	
 
 	///// modules /////
-	control_unit ctrl (
-		.opcode(opcode), .alu_src(alu_src), .mem_to_reg(mem_to_reg), .reg_write(reg_write), .mem_read(mem_read), 
-		.mem_write(mem_write), .branch(branch), .jump(jump), .halt(halt_sig), .alu_op_type(alu_op_type)
-	);
+  control_unit ctrl (
+    .opcode(opcode),
+    .funct3(funct3),
+    .RegSignPropagation(reg_sign_propagation),
+    .RegReadSize(reg_read_size),
+    .RegWriteEn(reg_write_en),
+    .ImmFormat(imm_format),
+    .PCAdd(pc_add),
+    .Branch(branch),
+    .Jump(jump),
+    .JalrJump(jalr_jump),
+    .MemReadEn(dmem_read_en),
+    .MemWriteEn(dmem_write_en),
+    .MemMask(dmem_mask),
+    .RegisterWriteSel(register_write_sel),
+    .Halt(halt),
+    .Retire(retire),
+    .ALUSrc(alu_src),
+    .ALUOp(alu_op)
+);
 
-	imm_gen ig (.inst(inst), .imm(imm_val));
-
-	regfile #( .BYPASS_EN(0) rf (
-		.clk(i_clk), .rst(i_rst), .read_reg1(rs1), .read_reg2(rs2), .write_reg(rd), .write_data(writeback_data),
-		.write_en(reg_write), .read_data1(rs1_data), .read_data2(rs2_data)
-	);
+	imm_gen ig (.i_inst(inst), .i_format(imm_format), .o_immediate(imm_val));
 
 	alu_control ac (
-		.alu_op_type(alu_op_type), .func3(func3), .bit30(inst[30]), .alu_cmd(alu_cmd)
+		.ALUOp(alu_op), .funct3(funct3), .funct7(funct7), .o_opsel(alu_opsel)
 	);
 
 	// alu muxes 
-	assign alu_in_a = (opcode == 7'b0010111) ? pc_reg : rs1_data;
+	assign alu_in_a = (pc_add) ? pc_reg : rs1_data;
 	assign alu_in_b = (alu_src) ? imm_val : rs2_data;
 
 	alu arith_logic_unit (
-		.in_a(alu_in_a), .in_b(alu_in_b), .alu_op(alu_cmd), .result(alu_result), .zero(alu_zero)
+		.i_op1(alu_in_a), .i_op2(alu_in_b), .i_opsel(alu_opsel), .result(alu_result), .zero(alu_zero)
 	);
 
 	// writeback mux 
-	assign writeback_data = (jump) ? pc_plus_4 :
-				  (mem_to_reg) ? mem_read_data :
-				  (opcode == 7'b0110111) ? imm_val :
-				  alu_result;
+	assign writeback_data = register_write_sel == 2'b00 ? alu_result 
+	                      : register_write_sel == 2'b01 ? pc_plus_4
+	                      : register_write_sel == 2'b10 ? imm_val
+	                      : register_write_sel == 2'b11 ? i_dmem_rdata
+	                      : 32'd0;
+                    
+  regfile #( .BYPASS_EN(0)) rf (
+    .i_clk(i_clk), .i_rst(i_rst), .i_rs1_raddr(rs1), .i_rs2_raddr(rs2), .i_rd_waddr(rd), .i_rd_wdata(writeback_data),
+		.i_rd_wen(reg_write_en), .o_rs1_rdata(rs1_data), .o_rs2_rdata(rs2_data)
+	);
 
 	///// trap logic and retire interface /////
+	// None of these logical operators are permitted.
+	// We will need to rewrite all of this as massive ternary statements
+	// You will need to check for when a load opcode is used with an invalid funct3 FYI
+	// Should probably check for valid and invalid combinations of: RegWriteEn, MemReadEn, and MemWriteEn
+	// Should probably check for when a store opcode is used with an invalid funct3 FYI
 	wire trap_unaligned_pc = (jump || branch_taken) && (jump_target[1:0] != 2'b00);
-	wire trap_unaligned_mem = (mem_read || em_write) &&
-			  ((func3 == 3'b010 && addr_align != 2'b00) ||
-			   ((func3 == 3'b001 || func3 == 3'b101) && addr_align[0] != 1'b0));
+	wire trap_unaligned_mem = (dmem_read_en || dmem_write_en) &&
+			  ((funct3 == 3'b010 && addr_align != 2'b00) ||
+			   ((funct3 == 3'b001 || funct3 == 3'b101) && addr_align[0] != 1'b0));
 
 	// illegal instruction check 
 	wire trap_illegal_inst = (inst[1:0] != 2'b11);
 
-	assign o_retire_valid = !i_rst && !halt_sig;
+	assign o_retire_valid = !i_rst && !halt;
 	assign o_retire_inst = inst;
-	assign o_retire_halt = halt_sig;
+	assign o_retire_halt = halt;
+  // None of these logical operators are permitted.
+	// We will need to rewrite all of this as massive ternary statements
 	assign o_retire_trap = trap_unaligned_pc || trap_unaligned_mem || trap_illegal_inst;
 	assign o_retire_rs1_raddr = rs1;
 	assign o_retire_rs2_raddr = rs2;
 	assign o_retire_rs1_rdata = rs1_data;
 	assign o_retire_rs2_rdata = rs2_data;
-	assign o_retire_rd_waddr = (reg_write) ? rd : 5'd0;
-	assign o_retire_rd_wdata = (reg_write) ? writeback_data : 32'd0;
+	assign o_retire_rd_waddr = (reg_write_en) ? rd : 5'd0;
+	assign o_retire_rd_wdata = (reg_write_en) ? writeback_data : 32'd0;
 	assign o_retire_pc = pc_reg;
 	assign o_retire_next_pc = next_pc;
 	
