@@ -76,6 +76,7 @@ module control_unit (
             3'b110: aluOP = 3'b110; 
             3'b111: aluOP = 3'b111; 
         endcase
+        //randomfdaoijf
       end
 
       // load instruction 
