@@ -40,6 +40,8 @@ module write_data_aligner(
 	always @(*) begin
 		dmem_mask = 4'b0000;
 		dmem_wdata = 32'b0;
+
+    //just do write shift 
     
     // Why is the data being replicated?
     // FYI data writes to D-Mem are appropriately masked off

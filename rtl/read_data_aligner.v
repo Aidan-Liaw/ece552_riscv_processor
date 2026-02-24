@@ -39,30 +39,30 @@ module read_data_aligner(
 	
 	assign mem_read_data = mem_data;
 	
-	left_shifter #(4, 2) lb_lbu_sll (4'b0001, addr_align, lb_lbu_mask);
-  left_shifter #(4, 2) lh_lhu_sll (4'b0011, {addr_align[1], 1'b0}, lh_lhu_mask);	
+    left_shifter #(4, 2) lb_lbu_sll (4'b0001, addr_align, lb_lbu_mask);
+    left_shifter #(4, 2) lh_lhu_sll (4'b0011, {addr_align[1], 1'b0}, lh_lhu_mask);	
 
 
-  // read data alignment 
+    // read data alignment 
 	always @(*) begin
 		dmem_mask = 4'b0000;
 
 		case (dmem_read_en)
 		  1'b1: begin
-        case (func3)
-          // lb and lbu
-          3'b000, 3'b100:
-            dmem_mask = lb_lbu_mask;
-          // lh and lhu
-          3'b001, 3'b101: 
-            dmem_mask = lh_lhu_mask;
-          // lw
-          3'b010:
-            dmem_mask = 4'b1111;  
-            
-           default:
-            dmem_mask = 4'b0000;
-        endcase
+            case (func3)
+            // lb and lbu
+            3'b000, 3'b100:
+                dmem_mask = lb_lbu_mask;
+            // lh and lhu
+            3'b001, 3'b101: 
+                dmem_mask = lh_lhu_mask;
+            // lw
+            3'b010:
+                dmem_mask = 4'b1111;  
+                
+            default:
+                dmem_mask = 4'b0000;
+            endcase
       end
       
       default: begin
@@ -72,7 +72,7 @@ module read_data_aligner(
 	end 
 	
 	right_shifter #(32, 5) rdata_srl (1'b0, i_dmem_rdata, {addr_align, 3'b000}, shifted_rdata);
-
+    
 	always @(*) begin
 		case (func3)
 			// lb

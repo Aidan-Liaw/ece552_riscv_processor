@@ -57,7 +57,7 @@ assign o_rs1_rdata = BYPASS_EN && i_rs1_raddr == i_rd_waddr && i_rd_waddr != 32'
                      : registers[(i_rs1_raddr << 5) +: 32];
 assign o_rs2_rdata = BYPASS_EN && i_rs2_raddr == i_rd_waddr && i_rd_waddr != 32'd0
                      ? i_rd_wdata 
-                     : registers[(i_rs2_raddr << 5) +: 32];
+                     : registers[(i_rs2_raddr << 5) +: 32]; //read from base address up to 32 bits 
                      
                      
 
