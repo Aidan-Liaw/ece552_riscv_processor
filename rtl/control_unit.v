@@ -15,9 +15,9 @@ module control_unit (
   output reg       JalrJump,           // 1 = jalr. For jalr only.
   output reg       MemReadEn,          // 1 = read from D-Mem. For loads only.
   output reg       MemWriteEn,         // 1 = write to D-Mem. For stores only.
-  output reg [3:0] MemMask,            // Determines how to D-Mem masks writes. For stores only.
   output reg [1:0] RegisterWriteSel,   // Determines what is written to rd. Only stores and branches don't use this.
   output reg       Halt,               // 1 = EBREAK, stop processor. For ebreak only.
+  output reg       Trap,
   output reg       Retire,             // Unused. Currently constant 1.
   output reg       ALUSrc,             // 0 = reg, 1 = imm. For i-type instructions only.
   output reg [2:0] ALUOp               // Sets the ALU operation.
@@ -35,7 +35,6 @@ module control_unit (
     JalrJump = 1'b0;
     MemReadEn = 1'b0;
     MemWriteEn = 1'b0;
-    MemMask = 4'b0000;
     //alu = 00, dmem = 11, imm = 10, pc + 4 = 01
     RegisterWriteSel = 2'b00;
     Halt = 1'b0;
@@ -97,14 +96,8 @@ module control_unit (
       7'b010_0011: begin
         ImmFormat = 6'b000100;
         MemWriteEn = 1'b1;
-        case (funct3)
-            3'b000: MemMask = 4'b0001;
-            3'b001: MemMask = 4'b0011;
-            3'b010: MemMask = 4'b1111;
-            default: MemMask = 4'b0000; // You should check for this.
-        endcase
         ALUSrc = 1'b1;
-//        ALUOp = 3'b000; // Is this needed? We're not writing to the register file
+        ALUOp = 3'b000; // Is this needed? We're not writing to the register file
       end
 
       // Branch
@@ -144,6 +137,7 @@ module control_unit (
       
       default: begin
         Halt = 1'b1; // You should probably trap as well.
+        Trap = 1'b0;
       end
     endcase
   end
