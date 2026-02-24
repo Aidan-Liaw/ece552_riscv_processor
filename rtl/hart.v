@@ -1,3 +1,7 @@
+`timescale 1ns / 1ps
+
+`default_nettype wire
+
 module hart #(
     // After reset, the program counter (PC) should be initialized to this
     // address and start executing instructions from there.
@@ -204,12 +208,12 @@ module hart #(
 	// END IF
   // None of these logical operators are permitted.
 	// We will need to rewrite all of this as massive ternary statements
-	assign next_pc = (jump || branch_taken) ? jump_target : pc_plus_4;
+	assign next_pc = (jump | branch_taken | jalr_jump) ? jump_target : pc_plus_4;
   // Changes PC on rising edge logic
 	always @(posedge i_clk) begin
 		if (i_rst) begin
 			pc_reg <= RESET_ADDR;
-		end else if (!halt) begin
+		end else if (~halt) begin
 			pc_reg <= next_pc;
 		end
 	end
@@ -244,7 +248,8 @@ module hart #(
 	assign o_dmem_mask = dmem_write_en == 1 ? write_dmem_mask : read_dmem_mask;
 	assign o_dmem_wdata = dmem_wdata;
 	
-
+	wire trap_control_unit;
+	
 	///// modules /////
   control_unit ctrl (
     .opcode(opcode),
@@ -259,9 +264,9 @@ module hart #(
     .JalrJump(jalr_jump),
     .MemReadEn(dmem_read_en),
     .MemWriteEn(dmem_write_en),
-    .MemMask(dmem_mask),
     .RegisterWriteSel(register_write_sel),
     .Halt(halt),
+    .Trap(trap_control_unit),
     .Retire(retire),
     .ALUSrc(alu_src),
     .ALUOp(alu_op)
@@ -270,7 +275,7 @@ module hart #(
 	imm_gen ig (.i_inst(inst), .i_format(imm_format), .o_immediate(imm_val));
 
 	alu_control ac (
-		.ALUOp(alu_op), .funct3(funct3), .funct7(funct7), .o_opsel(alu_opsel)
+		.ALUOp(alu_op), .funct3(funct3), .funct7(funct7), .is_immediate(imm_format[1]), .o_opsel(alu_opsel)
 	);
 
 	// alu muxes 
@@ -299,20 +304,20 @@ module hart #(
 	// You will need to check for when a load opcode is used with an invalid funct3 FYI
 	// Should probably check for valid and invalid combinations of: RegWriteEn, MemReadEn, and MemWriteEn
 	// Should probably check for when a store opcode is used with an invalid funct3 FYI
-	wire trap_unaligned_pc = (jump || branch_taken) && (jump_target[1:0] != 2'b00);
-	wire trap_unaligned_mem = (dmem_read_en || dmem_write_en) &&
-			  ((funct3 == 3'b010 && addr_align != 2'b00) ||
-			   ((funct3 == 3'b001 || funct3 == 3'b101) && addr_align[0] != 1'b0));
+	wire trap_unaligned_pc = (jump | branch_taken) & (jump_target[1:0] != 2'b00);
+	wire trap_unaligned_mem = (dmem_read_en | dmem_write_en) &
+			  ((funct3 == 3'b010 & addr_align != 2'b00) |
+			  ((funct3 == 3'b001 | funct3 == 3'b101) & addr_align[0] != 1'b0));
 
 	// illegal instruction check 
 	wire trap_illegal_inst = (inst[1:0] != 2'b11);
 
-	assign o_retire_valid = !i_rst && !halt;
+	assign o_retire_valid = (~i_rst);
 	assign o_retire_inst = inst;
 	assign o_retire_halt = halt;
   // None of these logical operators are permitted.
 	// We will need to rewrite all of this as massive ternary statements
-	assign o_retire_trap = trap_unaligned_pc || trap_unaligned_mem || trap_illegal_inst;
+	assign o_retire_trap = trap_unaligned_pc | trap_unaligned_mem | trap_illegal_inst | trap_control_unit;
 	assign o_retire_rs1_raddr = rs1;
 	assign o_retire_rs2_raddr = rs2;
 	assign o_retire_rs1_rdata = rs1_data;

@@ -1,3 +1,5 @@
+`timescale 1ns / 1ps
+
 `default_nettype none
 
 // The immediate generator is responsible for decoding the 32-bit sign-extended

@@ -1,3 +1,5 @@
+`timescale 1ns / 1ps
+
 `default_nettype none
 
 // The register file is effectively a single cycle memory with 32-bit words
@@ -45,6 +47,13 @@ reg [1023:0] registers = 1024'd0;
 reg [31:0] o_rs1_rdata_reg;
 reg [31:0] o_rs2_rdata_reg;
 
+// $clog2(1024) = 10, meaning you need 10 bits to address everything.
+// Otherwise there is not enough bits to address all of the memory.
+wire [9:0] rs1_raddr = {5'd0, i_rs1_raddr};
+wire [9:0] rs2_raddr = {5'd0, i_rs2_raddr};
+wire [9:0] rd_waddr  = {5'd0,  i_rd_waddr}; 
+
+
 // Logic for the assignments are as follows:
 // - IF BYPASS_EN == 1 AND write address == read address THEN
 // -    output data <= input data
@@ -52,12 +61,12 @@ reg [31:0] o_rs2_rdata_reg;
 // -    output data = data at requested register number
 // - END IF
 
-assign o_rs1_rdata = BYPASS_EN && i_rs1_raddr == i_rd_waddr && i_rd_waddr != 32'd0
+assign o_rs1_rdata = (BYPASS_EN == 1) & (i_rs1_raddr == i_rd_waddr) & (i_rd_waddr != 32'd0) & (i_rd_wen == 1'b1)
                      ? i_rd_wdata 
-                     : registers[(i_rs1_raddr << 5) +: 32];
-assign o_rs2_rdata = BYPASS_EN && i_rs2_raddr == i_rd_waddr && i_rd_waddr != 32'd0
+                     : registers[(rs1_raddr << 5) +: 32];
+assign o_rs2_rdata = (BYPASS_EN == 1) & (i_rs2_raddr == i_rd_waddr) & (i_rd_waddr != 32'd0) & (i_rd_wen == 1'b1)
                      ? i_rd_wdata 
-                     : registers[(i_rs2_raddr << 5) +: 32]; //read from base address up to 32 bits 
+                     : registers[(rs2_raddr << 5) +: 32]; //read from base address up to 32 bits 
                      
                      
 
@@ -68,9 +77,9 @@ always @(posedge i_clk) begin
     // END IF
     casez ({i_rst, i_rd_wen})
         2'b1? : registers <= 1024'd0;
-        2'b01 : registers[(i_rd_waddr << 5) +: 32] <= i_rd_waddr != 5'd0
+        2'b01 : registers[(rd_waddr << 5) +: 32]  <= i_rd_waddr != 5'd0
                                                   ? i_rd_wdata
-                                                  : registers[(i_rd_waddr << 5) +: 32];
+                                                  : registers[(rd_waddr << 5) +: 32];
         default : registers <= registers;
     endcase
 end

@@ -1,4 +1,6 @@
-`default_nettype none
+`timescale 1ns / 1ps
+
+`default_nettype wire
 
 module left_shifter 
 #(  parameter DATA_WIDTH = 32,
@@ -14,7 +16,7 @@ module left_shifter
     
     generate
         genvar idx;
-        for (idx = DATA_WIDTH - 1; idx >= 0; idx = idx - 1) begin
+        for (idx = DATA_WIDTH - 1; idx >= 0; idx = idx - 1) begin : left_shifter_gen
             // 1. i_op2 can equal 0xFFFF in theory, which would be considered negative, and cause problems, so the unsigned function stops this from being one
             // 2. signed ensures that the result is not treated as a positive number
             // 3. This HDL breaks if **anything** drives the o_result wire indirectly (such as initially assigning the wire connected to o_result in the testbench) and directly
