@@ -36,6 +36,13 @@ module write_data_aligner(
 	left_shifter #(4, 2) sb_sll (4'b0001, addr_align, sb_mask);
 	left_shifter #(4, 2) sh_sll (4'b0011, {addr_align[1], 1'b0}, sh_mask);
 
+    //added
+    wire [31:0] sb_wshifted;
+    wire [31:0] sh_wshifted;
+
+    left_shifter #(32, 5) sb2_sll ({24'b0, unaligned_data[7:0]}, {addr_align, 3'b000}, sb_wshifted);
+    left_shifter #(32, 5) sh2_sll ({16'b0, unaligned_data[15:0]}, {addr_align[1], 4'b0000}, sh_wshifted);
+
 	// write data alignment 
 	always @(*) begin
 		dmem_mask = 4'b0000;
@@ -60,13 +67,16 @@ module write_data_aligner(
           //sb
           3'b000: begin
             dmem_mask = sb_mask;
-            dmem_wdata = {4{unaligned_data[7:0]}};
+            //dmem_wdata = {4{unaligned_data[7:0]}};
+            //if already aligned properly just pass through
+            dmem_wdata = (addr_align == 2'b00) ? unaligned_data : sb_wshifted;
           end
   
           // sh
           3'b001: begin
             dmem_mask = sh_mask;
-            dmem_wdata = {2{unaligned_data[15:0]}};
+            //dmem_wdata = {2{unaligned_data[15:0]}};
+            dmem_wdata = (addr_align[1] == 1'b0) ? unaligned_data : sh_wshifted;
           end
   
           // sw 

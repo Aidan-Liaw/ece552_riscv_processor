@@ -290,7 +290,7 @@ module hart #(
 	assign writeback_data = register_write_sel == 2'b00 ? alu_result 
 	                      : register_write_sel == 2'b01 ? pc_plus_4
 	                      : register_write_sel == 2'b10 ? imm_val
-	                      : register_write_sel == 2'b11 ? i_dmem_rdata
+	                      : register_write_sel == 2'b11 ? mem_read_data //modified to read from read aligner
 	                      : 32'd0;
                     
   regfile #( .BYPASS_EN(0)) rf (

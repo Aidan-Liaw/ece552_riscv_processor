@@ -50,7 +50,8 @@ module control_unit (
         RegWriteEn = 1'b1;
         ImmFormat = 6'b000001; 
         RegisterWriteSel = 2'b00; 
-        ALUOp = funct3 == 3'b010 ? 3'b011 : funct3;
+        //modified to still distinguish between slt and sltu
+        ALUOp = funct3;
       end
 
       // i-type arithmetic
@@ -59,7 +60,7 @@ module control_unit (
         ALUSrc = 1'b1;
         ImmFormat = 6'b000010;
         RegisterWriteSel = 2'b00;
-        ALUOp = funct3 == 3'b010 ? 3'b011 : funct3;
+        ALUOp = funct3;
       end
       
       // lui

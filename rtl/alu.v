@@ -73,7 +73,8 @@ module alu (
         // Otherwise, MSBit of i_op1 will eliminate the remaining two options:
         // i_op1, i_op2 = 1, 0 means i_op1 is smaller
         // i_op1, i_op2 = 0, 1 means i_op1 is larger
-        result_reg = i_op1[31] == i_op2[31] ? {31'd0, i_op1[30:0] < i_op2[31:0]} : {31'd0, i_op1[31] == 1'b1};
+        //i_op2[31] was used instead of i_op2[30] so magnitude was not properly compared
+        result_reg = i_op1[31] == i_op2[31] ? {31'd0, i_op1[30:0] < i_op2[30:0]} : {31'd0, i_op1[31] == 1'b1};
 
       //sltu
       3'b011:
