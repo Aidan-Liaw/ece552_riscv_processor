@@ -16,47 +16,45 @@
 `default_nettype wire
 
 module alu (
-  input wire [31:0] i_op1,
-  input wire [31:0] i_op2,
-  input wire [5:0] i_opsel,
-  output wire [31:0] result,
-  output wire zero
+  input wire [31:0] op1,
+  input wire [31:0] op2,
+  input wire [5:0] opsel,
+  output wire [31:0] result
 );
 
-  wire is_arith = i_opsel[5];
-  wire is_sub = i_opsel[4];
-  wire is_unsigned = i_opsel[3];
-  wire [2:0] alu_op = i_opsel[2:0];
+  wire is_arith = opsel[5];
+  wire is_sub = opsel[4];
+  wire is_unsigned = opsel[3];
+  wire [2:0] alu_op = opsel[2:0];
   
   wire [31:0] ls_result;
   wire [31:0] rs_result;
   
   reg [31:0] result_reg;
   
-  assign zero = (result == 32'b0);
   
   assign result = result_reg;
   
-  left_shifter ls (i_op1, i_op2[4:0], ls_result);
-  right_shifter rs (is_arith, i_op1, i_op2[4:0], rs_result);
+  left_shifter ls (op1, op2[4:0], ls_result);
+  right_shifter rs (is_arith, op1, op2[4:0], rs_result);
 
   always @(*) begin
     case (alu_op)
       // add/sub
       3'b000:
-        result_reg = is_sub == 1'b1 ? i_op1 - i_op2 : i_op1 + i_op2;
+        result_reg = is_sub == 1'b1 ? op1 - op2 : op1 + op2;
 
       // and
       3'b111:
-        result_reg = i_op1 & i_op2;
+        result_reg = op1 & op2;
 
       // or
       3'b110:
-        result_reg = i_op1 | i_op2;
+        result_reg = op1 | op2;
 
       // xor
       3'b100:
-        result_reg = i_op1 ^ i_op2;
+        result_reg = op1 ^ op2;
 
       // sll
       3'b001:
@@ -70,15 +68,15 @@ module alu (
       // slt
       3'b010:
         // MSBit same means same sign, so check for magnitude
-        // Otherwise, MSBit of i_op1 will eliminate the remaining two options:
-        // i_op1, i_op2 = 1, 0 means i_op1 is smaller
-        // i_op1, i_op2 = 0, 1 means i_op1 is larger
-        //i_op2[31] was used instead of i_op2[30] so magnitude was not properly compared
-        result_reg = i_op1[31] == i_op2[31] ? {31'd0, i_op1[30:0] < i_op2[30:0]} : {31'd0, i_op1[31] == 1'b1};
+        // Otherwise, MSBit of op1 will eliminate the remaining two options:
+        // op1, op2 = 1, 0 means op1 is smaller
+        // op1, op2 = 0, 1 means op1 is larger
+        //op2[31] was used instead of op2[30] so magnitude was not properly compared
+        result_reg = op1[31] == op2[31] ? {31'd0, op1[30:0] < op2[30:0]} : {31'd0, op1[31] == 1'b1};
 
       //sltu
       3'b011:
-        result_reg = (i_op1 < i_op2) ? 32'b1 : 32'b0;
+        result_reg = (op1 < op2) ? 32'b1 : 32'b0;
 
       default:
         result_reg = 32'b0;

@@ -25,7 +25,7 @@
 
 module branch_condition_checker(
   input  wire        branch,
-  input  wire [2:0]  func3,
+  input  wire [2:0]  funct3,
   input  wire [31:0] rs1_data,
   input  wire [31:0] rs2_data,
   
@@ -39,7 +39,7 @@ module branch_condition_checker(
 	always @(*) begin
 		case (branch)
 		  1'b1: begin
-        case(func3)
+        case(funct3)
           3'b000: 
             branch_taken_reg = (rs1_data == rs2_data);  // beq
           3'b001: 

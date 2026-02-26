@@ -154,7 +154,6 @@ module hart #(
 
 	//// Control Unit wires 
 	// Regiser File control
-	wire reg_sign_propagation;
 	wire [1:0] reg_read_size;
 	wire reg_write_en;
   // Execute stage control
@@ -164,7 +163,6 @@ module hart #(
   // Flow control
   wire branch; // 0 for non-branch instructions, 1 for branch instructions
 	wire jump; // 0 for non-jump instructions, 1 for jump instructions
-	wire jalr_jump;
 	// Data Memory control
 	wire dmem_read_en;
 	wire dmem_write_en;
@@ -173,7 +171,6 @@ module hart #(
 	wire [1:0] register_write_sel;
 	// Processor status control
 	wire halt; // Active-high
-	wire retire; // Active-high
 	// ALU control
 	wire [2:0] alu_op; // Operand setter for ALU Control module
 	
@@ -186,8 +183,6 @@ module hart #(
 	wire [31:0] writeback_data; // Data to write to Write Register
 	wire [31:0] alu_in_a, alu_in_b; // ALU inputs
 	wire [31:0] alu_result; // ALU result output
-	wire alu_branch, alu_zero; // ALU condition outputs
-
 
   // LOGIC
   
@@ -208,7 +203,7 @@ module hart #(
 	// END IF
   // None of these logical operators are permitted.
 	// We will need to rewrite all of this as massive ternary statements
-	assign next_pc = (jump | branch_taken | jalr_jump) ? jump_target : pc_plus_4;
+	assign next_pc = (jump | branch_taken) ? jump_target : pc_plus_4;
   // Changes PC on rising edge logic
 	always @(posedge i_clk) begin
 		if (i_rst) begin
@@ -234,14 +229,14 @@ module hart #(
 	wire [3:0]  write_dmem_mask;
   wire [3:0]  read_dmem_mask;
 	wire [31:0] dmem_wdata;
-	wire [31:0] mem_read_data;
+	wire [31:0] dmem_rdata;
 
   write_data_aligner write_data_aligner(addr_align, dmem_write_en, 
     funct3, rs2_data, write_dmem_mask, dmem_wdata);
     
     
   read_data_aligner read_data_aligner(addr_align, dmem_read_en,
-    funct3, i_dmem_rdata, mem_read_data, read_dmem_mask);
+    funct3, i_dmem_rdata, read_dmem_mask, dmem_rdata);
 
   // If both dmem_write_en and read_dmem_mask hold true, the processor will trap
   // and execution should stop, so this should be safe
@@ -254,55 +249,52 @@ module hart #(
   control_unit ctrl (
     .opcode(opcode),
     .funct3(funct3),
-    .RegSignPropagation(reg_sign_propagation),
-    .RegReadSize(reg_read_size),
-    .RegWriteEn(reg_write_en),
-    .ImmFormat(imm_format),
-    .PCAdd(pc_add),
-    .Branch(branch),
-    .Jump(jump),
-    .JalrJump(jalr_jump),
-    .MemReadEn(dmem_read_en),
-    .MemWriteEn(dmem_write_en),
-    .RegisterWriteSel(register_write_sel),
-    .Halt(halt),
-    .Trap(trap_control_unit),
-    .Retire(retire),
-    .ALUSrc(alu_src),
-    .ALUOp(alu_op)
+    .reg_write_en(reg_write_en),
+    .imm_format(imm_format),
+    .pc_add(pc_add),
+    .branch(branch),
+    .jump(jump),
+    .mem_read_en(dmem_read_en),
+    .mem_write_en(dmem_write_en),
+    .write_reg_sel(register_write_sel),
+    .halt(halt),
+    .trap(trap_control_unit),
+    .alu_src(alu_src),
+    .alu_op(alu_op)
 );
 
-	imm_gen ig (.i_inst(inst), .i_format(imm_format), .o_immediate(imm_val));
+	imm_gen ig (.instr(inst), .instr_format(imm_format), .immediate(imm_val));
 
 	alu_control ac (
-		.ALUOp(alu_op), .funct3(funct3), .funct7(funct7), .is_immediate(imm_format[1]), .o_opsel(alu_opsel)
+		.alu_op(alu_op), .funct3(funct3), .funct7(funct7), .is_immediate(imm_format[1]), .opsel(alu_opsel)
 	);
+
 
 	// alu muxes 
 	assign alu_in_a = (pc_add) ? pc_reg : rs1_data;
 	assign alu_in_b = (alu_src) ? imm_val : rs2_data;
 
 	alu arith_logic_unit (
-		.i_op1(alu_in_a), .i_op2(alu_in_b), .i_opsel(alu_opsel), .result(alu_result), .zero(alu_zero)
+		.op1(alu_in_a), .op2(alu_in_b), .opsel(alu_opsel), .result(alu_result)
 	);
 
 	// writeback mux 
 	assign writeback_data = register_write_sel == 2'b00 ? alu_result 
 	                      : register_write_sel == 2'b01 ? pc_plus_4
 	                      : register_write_sel == 2'b10 ? imm_val
-	                      : register_write_sel == 2'b11 ? mem_read_data //modified to read from read aligner
+	                      : register_write_sel == 2'b11 ? dmem_rdata //modified to read from read aligner
 	                      : 32'd0;
                     
   regfile #( .BYPASS_EN(0)) rf (
-    .i_clk(i_clk), .i_rst(i_rst), .i_rs1_raddr(rs1), .i_rs2_raddr(rs2), .i_rd_waddr(rd), .i_rd_wdata(writeback_data),
-		.i_rd_wen(reg_write_en), .o_rs1_rdata(rs1_data), .o_rs2_rdata(rs2_data)
+    .clk(i_clk), .rst(i_rst), .rs1_raddr(rs1), .rs2_raddr(rs2), .rd_waddr(rd), .rd_wdata(writeback_data),
+		.rd_wen(reg_write_en), .rs1_rdata(rs1_data), .rs2_rdata(rs2_data)
 	);
 
 	///// trap logic and retire interface /////
 	// None of these logical operators are permitted.
 	// We will need to rewrite all of this as massive ternary statements
 	// You will need to check for when a load opcode is used with an invalid funct3 FYI
-	// Should probably check for valid and invalid combinations of: RegWriteEn, MemReadEn, and MemWriteEn
+	// Should probably check for valid and invalid combinations of: reg_write_en, mem_read_en, and mem_write_en
 	// Should probably check for when a store opcode is used with an invalid funct3 FYI
 	wire trap_unaligned_pc = (jump | branch_taken) & (jump_target[1:0] != 2'b00);
 	wire trap_unaligned_mem = (dmem_read_en | dmem_write_en) &

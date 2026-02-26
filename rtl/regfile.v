@@ -19,28 +19,25 @@ module regfile #(
     parameter BYPASS_EN = 0
 ) (
     // Global clock.
-    input  wire        i_clk,
+    input  wire        clk,
     // Synchronous active-high reset.
-    input  wire        i_rst,
+    input  wire        rst,
     // Both read register ports are asynchronous (zero-cycle). That is, read
     // data is visible combinationally without having to wait for a clock.
     //
     // Register read port 1, with input address [0, 31] and output data.
-    input  wire [ 4:0] i_rs1_raddr,
-    output wire [31:0] o_rs1_rdata,
+    input  wire [ 4:0] rs1_raddr,
+    output wire [31:0] rs1_rdata,
     // Register read port 2, with input address [0, 31] and output data.
-    input  wire [ 4:0] i_rs2_raddr,
-    output wire [31:0] o_rs2_rdata,
+    input  wire [ 4:0] rs2_raddr,
+    output wire [31:0] rs2_rdata,
     // The register write port is synchronous. When write is enabled, the
     // write data is visible after the next clock edge.
     //
     // Write register enable, address [0, 31] and input data.
-    input  wire        i_rd_wen,
-    input  wire [ 4:0] i_rd_waddr,
-    input  wire [31:0] i_rd_wdata
-    
-//    input  wire        i_wr_sign_propagation,
-//    input  wire [ 1:0] i_rd_size
+    input  wire        rd_wen,
+    input  wire [ 4:0] rd_waddr,
+    input  wire [31:0] rd_wdata
 );
 
 reg [1023:0] registers = 1024'd0;
@@ -49,9 +46,9 @@ reg [31:0] o_rs2_rdata_reg;
 
 // $clog2(1024) = 10, meaning you need 10 bits to address everything.
 // Otherwise there is not enough bits to address all of the memory.
-wire [9:0] rs1_raddr = {5'd0, i_rs1_raddr};
-wire [9:0] rs2_raddr = {5'd0, i_rs2_raddr};
-wire [9:0] rd_waddr  = {5'd0,  i_rd_waddr}; 
+wire [9:0] rs1_raddr_reg = {5'd0, rs1_raddr};
+wire [9:0] rs2_raddr_reg = {5'd0, rs2_raddr};
+wire [9:0] rd_waddr_reg  = {5'd0,  rd_waddr}; 
 
 
 // Logic for the assignments are as follows:
@@ -61,25 +58,25 @@ wire [9:0] rd_waddr  = {5'd0,  i_rd_waddr};
 // -    output data = data at requested register number
 // - END IF
 
-assign o_rs1_rdata = (BYPASS_EN == 1) & (i_rs1_raddr == i_rd_waddr) & (i_rd_waddr != 32'd0) & (i_rd_wen == 1'b1)
-                     ? i_rd_wdata 
-                     : registers[(rs1_raddr << 5) +: 32];
-assign o_rs2_rdata = (BYPASS_EN == 1) & (i_rs2_raddr == i_rd_waddr) & (i_rd_waddr != 32'd0) & (i_rd_wen == 1'b1)
-                     ? i_rd_wdata 
-                     : registers[(rs2_raddr << 5) +: 32]; //read from base address up to 32 bits 
+assign rs1_rdata = (BYPASS_EN == 1) & (rs1_raddr_reg == rd_waddr_reg) & (rd_waddr_reg != 32'd0) & (rd_wen == 1'b1)
+                     ? rd_wdata 
+                     : registers[(rs1_raddr_reg << 5) +: 32];
+assign rs2_rdata = (BYPASS_EN == 1) & (rs2_raddr_reg == rd_waddr_reg) & (rd_waddr_reg != 32'd0) & (rd_wen == 1'b1)
+                     ? rd_wdata 
+                     : registers[(rs2_raddr_reg << 5) +: 32]; //read from base address up to 32 bits 
                      
                      
 
-always @(posedge i_clk) begin
+always @(posedge clk) begin
     // IF reset == 1 THEN ALWAYS reset
     // ELSE IF write enable == 1 then write
     // ELSE registers remain unchanged
     // END IF
-    casez ({i_rst, i_rd_wen})
+    casez ({rst, rd_wen})
         2'b1? : registers <= 1024'd0;
-        2'b01 : registers[(rd_waddr << 5) +: 32]  <= i_rd_waddr != 5'd0
-                                                  ? i_rd_wdata
-                                                  : registers[(rd_waddr << 5) +: 32];
+        2'b01 : registers[(rd_waddr_reg << 5) +: 32]  <= rd_waddr_reg != 5'd0
+                                                      ? rd_wdata
+                                                      : registers[(rd_waddr_reg << 5) +: 32];
         default : registers <= registers;
     endcase
 end

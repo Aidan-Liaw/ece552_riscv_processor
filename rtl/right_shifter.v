@@ -7,12 +7,12 @@ module right_shifter
     parameter SHIFT_WIDTH = 5)
  (
     // When asserted, right shifts should be treated as arithmetic instead of
-    // logical. This is only used for `i_opsel == 3'b101` (shift right).
+    // logical. This is only used for `opsel == 3'b101` (shift right).
     input  wire        i_arith,
     // First 32-bit input operand.
-    input  wire [DATA_WIDTH - 1:0] i_op1,
+    input  wire [DATA_WIDTH - 1:0] op1,
     // Second 32-bit input operand.
-    input  wire [SHIFT_WIDTH - 1:0] i_op2,
+    input  wire [SHIFT_WIDTH - 1:0] op2,
     // 32-bit output result. Any carry out should be ignored.
     output wire [DATA_WIDTH - 1:0] o_result
 );
@@ -25,8 +25,8 @@ module right_shifter
             // Else pad 0 or the MSBit depending on whether the shift is logical or arithmetic
             // Note the weird 1'b0 appends to ensure that the value is unsigned when the comparison takes palce
             // Code was originally tested without the [4:0] slice, so weird append may no longer be required
-            assign o_result[idx] = ({1'b0, i_op2[SHIFT_WIDTH - 1:0]} + idx) < {1'b0, DATA_WIDTH} ? i_op1[i_op2[SHIFT_WIDTH - 1:0] + idx] :
-                                   i_arith == 1'b1                                                ? i_op1[DATA_WIDTH - 1]                 :
+            assign o_result[idx] = ({1'b0, op2[SHIFT_WIDTH - 1:0]} + idx) < {1'b0, DATA_WIDTH} ? op1[op2[SHIFT_WIDTH - 1:0] + idx] :
+                                   i_arith == 1'b1                                                ? op1[DATA_WIDTH - 1]                 :
                                    1'b0;
         end
     endgenerate                  

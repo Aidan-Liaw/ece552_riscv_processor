@@ -24,22 +24,21 @@ module read_data_aligner(
   input wire  [1:0]  addr_align,
   input wire         dmem_read_en,
   input wire  [2:0]  func3,
-  input wire  [31:0] i_dmem_rdata,
+  input wire  [31:0] dmem_rdata,
   
-  output wire [31:0] mem_read_data,
-  output reg  [3:0]  dmem_mask
+  output reg  [3:0]  dmem_mask,
+  output wire [31:0] dmem_wdata
 );
 	
 	reg [31:0] mem_data;
   wire [31:0] shifted_rdata;
-
-	wire [3:0]  lb_lbu_mask;
+  
+  wire [3:0]  lb_lbu_mask;
 	wire [3:0]  lh_lhu_mask;
-	
-	
-	assign mem_read_data = mem_data;
-	
-    left_shifter #(4, 2) lb_lbu_sll (4'b0001, addr_align, lb_lbu_mask);
+  
+  assign dmem_wdata = mem_data;
+  
+  left_shifter #(4, 2) lb_lbu_sll (4'b0001, addr_align, lb_lbu_mask);
     left_shifter #(4, 2) lh_lhu_sll (4'b0011, {addr_align[1], 1'b0}, lh_lhu_mask);	
 
 
@@ -70,8 +69,8 @@ module read_data_aligner(
       end
 		endcase
 	end 
-	
-	right_shifter #(32, 5) rdata_srl (1'b0, i_dmem_rdata, {addr_align, 3'b000}, shifted_rdata);
+  
+	right_shifter #(32, 5) rdata_srl (1'b0, dmem_rdata, {addr_align, 3'b000}, shifted_rdata);
     
 	always @(*) begin
 		case (func3)

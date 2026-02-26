@@ -21,12 +21,12 @@
 
 
 module write_data_aligner(
-  input wire [1:0] addr_align,
-  input wire dmem_write_en,
-  input wire [2:0]  func3,
+  input wire [1:0]  addr_align,
+  input wire        dmem_write_en,
+  input wire [2:0]  funct3,
   input wire [31:0] unaligned_data,
 
-  output reg [3:0] dmem_mask,
+  output reg [3:0]  dmem_mask,
   output reg [31:0] dmem_wdata
 );
 	
@@ -63,7 +63,7 @@ module write_data_aligner(
     // which means that correct alignment is of our concern.
 		case (dmem_write_en)
 		  1'b1: begin
-        case(func3)
+        case(funct3)
           //sb
           3'b000: begin
             dmem_mask = sb_mask;
