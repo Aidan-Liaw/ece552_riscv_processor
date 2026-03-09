@@ -39,7 +39,7 @@ module read_data_aligner(
   assign dmem_wdata = mem_data;
   
   left_shifter #(4, 2) lb_lbu_sll (4'b0001, addr_align, lb_lbu_mask);
-    left_shifter #(4, 2) lh_lhu_sll (4'b0011, {addr_align[1], 1'b0}, lh_lhu_mask);	
+  left_shifter #(4, 2) lh_lhu_sll (4'b0011, {addr_align[1], 1'b0}, lh_lhu_mask);	
 
 
     // read data alignment 

@@ -6,7 +6,7 @@ module hart #(
     // After reset, the program counter (PC) should be initialized to this
     // address and start executing instructions from there.
     parameter RESET_ADDR = 32'h00000000
-) (
+) (    
     // Global clock.
     input  wire        i_clk,
     // Synchronous active-high reset.
@@ -124,171 +124,477 @@ module hart #(
     output wire [31:0] o_retire_rd_wdata,
     // The current program counter of the instruction being retired - i.e.
     // the instruction memory address that the instruction was fetched from.
+    
+    output wire [31:0] o_retire_dmem_addr,
+    output wire        o_retire_dmem_ren,
+    output wire        o_retire_dmem_wen,
+    output wire [ 3:0] o_retire_dmem_mask,
+    output wire [31:0] o_retire_dmem_wdata,
+    output wire [31:0] o_retire_dmem_rdata,
+
+    
     output wire [31:0] o_retire_pc,
     // the next program counter after the instruction is retired. For most
     // instructions, this is `o_retire_pc + 4`, but must be the branch or jump
     // target for *taken* branches and jumps.
     output wire [31:0] o_retire_next_pc
-
 `ifdef RISCV_FORMAL
     ,`RVFI_OUTPUTS,
 `endif
 );
-
-  ////// VARIABLES
+  wire        halt;
+	
+	wire [31:0] if_pc;
+	wire [31:0] if_pc_plus_4;
+	wire        if_halt; // ?
+	
+  wire        pc_write_en;
   
-	// PC wires
-	reg  [31:0] pc_reg; // The PC register from the schematic
-	wire [31:0] next_pc; // The wire entering the PC register in the schemayoc
-	wire [31:0] pc_plus_4 = pc_reg + 32'd4; // The output wire of the adder for PC + 4
-	wire [31:0] branch_target; // 1 Usage in Find. ??????
-
-	// instruction decoding wires
-	wire [31:0] inst   = i_imem_rdata;
-	wire [6:0]  opcode = inst[6:0];
-	wire [4:0]  rd     = inst[11:7];
-	wire [2:0]  funct3 = inst[14:12];
-	wire [4:0]  rs1    = inst[19:15];
-	wire [4:0]  rs2    = inst[24:20];
-	wire [6:0]  funct7 = inst[31:25];
-
-	//// Control Unit wires 
-	// Regiser File control
-	wire [1:0] reg_read_size;
-	wire reg_write_en;
-  // Execute stage control
-  wire [5:0] imm_format;
-  wire pc_add; // 0 for rs1_data, 1 for PC
-  wire alu_src; // 0 for rs2_data, 1 for immediate
-  // Flow control
-  wire branch; // 0 for non-branch instructions, 1 for branch instructions
-	wire jump; // 0 for non-jump instructions, 1 for jump instructions
-	// Data Memory control
-	wire dmem_read_en;
-	wire dmem_write_en;
-	// Write Register input control
-	wire [3:0] dmem_mask;
-	wire [1:0] register_write_sel;
-	// Processor status control
-	wire halt; // Active-high
-	// ALU control
-	wire [2:0] alu_op; // Operand setter for ALU Control module
+  wire [31:0] wb_next_pc;
 	
-	// ALU Control Signal
-  wire [5:0] alu_opsel;
-
-	// Data wires 
-	wire [31:0] imm_val; // Output from Immediate Generation
-	wire [31:0] rs1_data, rs2_data; // Output from RF from registers' data
-	wire [31:0] writeback_data; // Data to write to Write Register
-	wire [31:0] alu_in_a, alu_in_b; // ALU inputs
-	wire [31:0] alu_result; // ALU result output
-
-  // LOGIC
-  
-	///// branch and next pc logic /////
-  wire branch_taken;
-	branch_condition_checker branch_condition_checker(branch, funct3, rs1_data, rs2_data, branch_taken);
-  // IF opcode == 7'b1100111 THEN
-  //    jalr jump 
-  // ELSE 
-  //    jal jump 
-  // END IF
-  // Remember that 1b shift is done in Immediate Generator, so no need to do it here.
-	wire [31:0] jump_target = (opcode == 7'b1100111) ? {alu_result[31:1], 1'b0} : (pc_reg + imm_val);
-	// IF jump OR branch condition valid THEN
-	//   next_pc = jump_target
-	// ELSE
-	//   next_pc = pc_reg + 4
-	// END IF
-  // None of these logical operators are permitted.
-	// We will need to rewrite all of this as massive ternary statements
-	assign next_pc = (jump | branch_taken) ? jump_target : pc_plus_4;
-  // Changes PC on rising edge logic
-	always @(posedge i_clk) begin
-		if (i_rst) begin
-			pc_reg <= RESET_ADDR;
-		end else if (~halt) begin
-			pc_reg <= next_pc;
-		end
-	end
-  // Sets the I-Mem to the address whose instruction must be executed
-  // ZERO CYCLE LATENCY
-	assign o_imem_raddr = pc_reg;
-
-	///// mem alignment logic /////
-	wire [1:0] addr_align = alu_result[1:0];
-
-	// mem outputs
-	// In a real RV32-I, only the LSBit is 0'ed, but since we are no factoring in 
-	// the C or Zc* extenstions, this is fine
-	assign o_dmem_addr = {alu_result[31:2], 2'b00};
-	assign o_dmem_ren = dmem_read_en;
-	assign o_dmem_wen = dmem_write_en;
-	
-	wire [3:0]  write_dmem_mask;
-  wire [3:0]  read_dmem_mask;
-	wire [31:0] dmem_wdata;
-	wire [31:0] dmem_rdata;
-
-  write_data_aligner write_data_aligner(addr_align, dmem_write_en, 
-    funct3, rs2_data, write_dmem_mask, dmem_wdata);
-    
-    
-  read_data_aligner read_data_aligner(addr_align, dmem_read_en,
-    funct3, i_dmem_rdata, read_dmem_mask, dmem_rdata);
-
-  // If both dmem_write_en and read_dmem_mask hold true, the processor will trap
-  // and execution should stop, so this should be safe
-	assign o_dmem_mask = dmem_write_en == 1 ? write_dmem_mask : read_dmem_mask;
-	assign o_dmem_wdata = dmem_wdata;
-	
-	wire trap_control_unit;
-	
-	///// modules /////
-  control_unit ctrl (
-    .opcode(opcode),
-    .funct3(funct3),
-    .reg_write_en(reg_write_en),
-    .imm_format(imm_format),
-    .pc_add(pc_add),
-    .branch(branch),
-    .jump(jump),
-    .mem_read_en(dmem_read_en),
-    .mem_write_en(dmem_write_en),
-    .write_reg_sel(register_write_sel),
+	fetch  #(
+    .RESET_ADDR(32'h00000000)
+  ) fetch (
+    .i_clk(i_clk),
+    .i_rst(i_rst),
     .halt(halt),
-    .trap(trap_control_unit),
-    .alu_src(alu_src),
-    .alu_op(alu_op)
+    
+    .next_pc(wb_next_pc),
+    .pc_write_en(pc_write_en),
+    
+    .pc(if_pc),
+    .pc_plus_4(if_pc_plus_4)
+  );
+
+	assign o_imem_raddr = if_pc;
+	
+	wire        if_flush;
+  wire        if_id_write_en;
+  wire [31:0] if_id_instr = i_imem_rdata;
+  
+  wire [31:0] id_instr;
+  wire [31:0] id_pc;
+  
+  if_id_registers #(
+    .NOP_INSTRUCTION(32'h00000013)
+  ) if_id_registers (
+    .i_clk(i_clk),
+    .halt(halt),
+    .if_flush(if_flush),
+    .write_en(if_id_write_en),
+    
+    .i_instr(if_id_instr),
+    .i_pc(if_pc),
+
+    .o_instr(id_instr),
+    .o_pc(id_pc)
+  );
+  
+  // id_instr, id_pc, are all defined earlier
+  wire [31:0] id_next_pc;
+  
+  wire [31:0] id_rs1_data;
+  wire [31:0] id_rs2_data;
+  
+  wire        keep_halting;
+  
+  wire [31:0] id_imm_val;
+  wire        id_pc_add;
+  wire        id_alu_src;
+  wire [ 4:0] id_alu_opsel;
+  
+  wire        id_dmem_read_en;
+  wire        id_dmem_write_en;
+  wire [ 2:0] id_funct3;
+  
+  wire        id_reg_write_en;
+  wire [ 1:0] id_register_write_sel;
+  
+  // if_id_write_en is defined earlier
+  // pc_write_en is defined earlier
+  wire        cu_passthrough_en;
+  
+  // if_flush is defined earlier
+  wire        id_flush;
+  wire        ex_flush;
+  wire        mem_flush;
+  
+  wire        trap_control_unit;
+
+  wire [31:0] ex_instr;
+  wire        ex_halt;
+  wire        ex_dmem_read_en;
+  wire        ex_reg_write_en;
+  wire [ 4:0] ex_rd = (ex_instr == 7'b010_0011) | (ex_instr == 7'b110_0011) 
+                       ? ex_instr[11:7] 
+                       : 7'd0;
+                       
+  wire [31:0] mem_instr;
+  wire        mem_halt;
+  wire        mem_dmem_read_en;
+  wire        mem_reg_write_en;
+  wire [ 4:0] mem_rd = (mem_instr == 7'b010_0011) | (mem_instr == 7'b110_0011) 
+                        ? mem_instr[11:7] 
+                        : 7'd0;
+   
+  wire [31:0] wb_instr;
+  wire        wb_halt;
+  wire        wb_reg_write_en;
+  wire [ 4:0] wb_rd = (wb_instr == 7'b010_0011) | (wb_instr == 7'b110_0011) 
+                     ? wb_instr[11:7] 
+                     : 7'd0;
+                     
+  wire [31:0] writeback_data;
+
+  decode decode (
+    .i_clk(i_clk),
+    .i_rst(i_rst),
+    
+    .i_instr(id_instr),
+    .i_pc(id_pc),
+
+//    .id_ex_mem_read(ex_dmem_read_en),
+    .id_ex_rd(ex_rd),
+    .id_ex_reg_write(ex_reg_write_en),
+    
+    .ex_mem_rd(mem_rd),
+    .ex_mem_reg_write(mem_reg_write_en),
+    
+    .mem_wb_rd(wb_rd),
+    .mem_wb_reg_write(wb_reg_write_en),
+    
+    .writeback_data(writeback_data),
+    
+    .keep_halting(keep_halting),
+
+
+    .o_instr(id_instr),
+    .o_pc(id_pc),
+    .o_next_pc(id_next_pc),
+
+    // Register data
+    .rs1_data(id_rs1_data),
+    .rs2_data(id_rs2_data),
+
+
+    .imm_val(id_imm_val),
+    .pc_add(id_pc_add), // 0 for rs1_data, 1 for PC
+    .alu_src(id_alu_src), // 0 for rs2_data, 1 for immediate
+    .alu_opsel(id_alu_opsel), // ALU Control Signal
+
+    .dmem_read_en(id_dmem_read_en),
+    .dmem_write_en(id_dmem_write_en),
+    .funct3(id_funct3),
+
+    .reg_write_en(id_reg_write_en), // Regiser File control
+    .register_write_sel(id_register_write_sel), 
+
+    .if_id_write_en(if_id_write_en),
+    .pc_write_en(pc_write_en),
+    .cu_passthrough_en(cu_passthrough_en),
+
+    .if_flush(if_flush),
+    .id_flush(id_flush),
+    .ex_flush(ex_flush),
+    .mem_flush(mem_flush),
+
+    .halt_generate(halt),
+    .trap_control_unit(trap_control_unit)
+  );
+  
+  // ex_instr is defined earlier
+  wire [31:0] ex_pc;
+  wire [31:0] ex_next_pc;
+  
+  wire        ex_is_halting;
+
+  wire [31:0] ex_rs1_data;
+  wire [31:0] ex_rs2_data;
+
+  wire [31:0] ex_imm_val;
+  wire        ex_pc_add;
+  wire        ex_alu_src;
+  wire [ 4:0] ex_alu_opsel;
+
+  // ex_dmem_read_en is defined earlier
+  wire        ex_dmem_write_en;
+  wire [ 2:0] ex_funct3;
+
+  // ex_reg_write_en is defined earlier
+  wire [ 1:0] ex_register_write_sel;
+  wire        ex_is_retiring;
+
+
+  id_ex_registers #(
+    .NOP_INSTRUCTION(32'h00000013)
+  ) id_ex_registers (
+    .i_clk(i_clk),
+    
+    .i_instr(id_instr),
+    .i_pc(id_pc),
+    .i_next_pc(id_next_pc),
+    
+    .id_flush(id_flush),
+    .cu_passthrough_en(cu_passthrough_en),
+    .i_is_halting(halt),
+
+    
+    .i_rs1_data(id_rs1_data),
+    .i_rs2_data(id_rs2_data),
+    
+    
+    .i_imm_val(id_imm_val),
+    .i_pc_add(id_pc_add), // 0 for rs1_data, 1 for PC
+    .i_alu_src(id_alu_src), // 0 for rs2_data, 1 for immediate
+    .i_alu_opsel(id_alu_opsel), // ALU Control Signal
+
+    .i_dmem_read_en(id_dmem_read_en),
+    .i_dmem_write_en(id_dmem_write_en),
+    .i_funct3(id_funct3),
+
+    .i_reg_write_en(id_reg_write_en), // Regiser File control
+    .i_register_write_sel(id_register_write_sel),    
+
+
+    .o_instr(ex_instr),
+    .o_pc(ex_pc),
+    .o_next_pc(ex_next_pc),
+    
+    .o_is_halting(ex_is_halting),
+
+    .o_rs1_data(ex_rs1_data),
+    .o_rs2_data(ex_rs2_data),
+
+    .keep_halting(keep_halting),
+
+
+    .o_imm_val(ex_imm_val),
+    .o_pc_add(ex_pc_add), // 0 for rs1_data, 1 for PC
+    .o_alu_src(ex_alu_src), // 0 for rs2_data, 1 for immediate
+    .o_alu_opsel(ex_alu_opsel), // ALU Control Signal
+
+    .o_dmem_read_en(ex_dmem_read_en),
+    .o_dmem_write_en(ex_dmem_write_en),
+    .o_funct3(ex_funct3),
+
+    .o_reg_write_en(ex_reg_write_en), // Regiser File control
+    .o_register_write_sel(ex_register_write_sel),
+    .o_is_retiring(ex_is_retiring)
+  );
+  
+  wire [31:0] ex_alu_result;
+  
+  execute execute (
+    .pc(ex_pc),
+    .imm_val(ex_imm_val),
+    
+    .rs1_data(ex_rs1_data),
+    .rs2_data(ex_rs2_data),
+    
+    .pc_add(ex_pc_add), // 0 for rs1_data, 1 for PC
+    .alu_src(ex_alu_src), // 0 for rs2_data, 1 for immediate
+    .alu_opsel(ex_alu_opsel), // ALU Control Signal
+    
+    .alu_result(ex_alu_result)
+  );
+  
+  // mem_instr is dfined earlier
+  wire [31:0] mem_pc;
+  wire [31:0] mem_next_pc;
+  
+  wire        mem_is_halting;
+
+
+  wire [31:0] mem_rs1_data;
+  wire [31:0] mem_rs2_data;
+  
+  wire [31:0] mem_alu_result;
+
+  wire [31:0] mem_imm_val;
+  wire        mem_pc_add;
+  wire        mem_alu_src;
+  wire [ 4:0] mem_alu_opsel;
+
+  // mem_dmem_read_en is defined earlier
+  wire        mem_dmem_write_en;
+  wire [ 2:0] mem_funct3;
+
+  // mem_reg_write_en is defined earlier
+  wire [ 1:0] mem_register_write_sel;
+  wire        mem_is_retiring;
+  
+  
+  ex_mem_registers #(
+    .NOP_INSTRUCTION(32'h00000013)
+  ) ex_mem_registers (
+    .i_clk(i_clk),
+
+    .i_instr(ex_instr),
+    .i_pc(ex_pc),
+    .i_next_pc(ex_next_pc),
+    
+    .i_is_halting(ex_is_halting),
+
+    .ex_flush(ex_flush),
+
+    .i_rs1_data(ex_rs1_data),
+    .i_rs2_data(ex_rs2_data),
+
+    .i_alu_result(ex_alu_result),
+
+
+    .i_dmem_read_en(ex_dmem_read_en),
+    .i_dmem_write_en(ex_dmem_write_en),
+    .i_funct3(ex_funct3),
+
+    .i_imm_val(ex_imm_val),
+    .i_reg_write_en(ex_reg_write_en), // Regiser File control
+    .i_register_write_sel(ex_register_write_sel), 
+
+    .i_is_retiring(ex_is_retiring),
+
+
+    .o_instr(mem_instr),
+    .o_pc(mem_pc),
+    .o_next_pc(mem_next_pc),
+    
+    .o_is_halting(mem_is_halting),
+
+
+    .o_rs1_data(mem_rs1_data),
+    .o_rs2_data(mem_rs2_data),
+
+    .o_alu_result(mem_alu_result),
+
+
+    .o_dmem_read_en(mem_dmem_read_en),
+    .o_dmem_write_en(mem_dmem_write_en),
+    .o_funct3(mem_funct3),
+
+    .o_imm_val(mem_imm_val),
+    .o_reg_write_en(mem_reg_write_en), // Regiser File control
+    .o_register_write_sel(mem_register_write_sel),
+    
+    .o_is_retiring(mem_is_retiring)
+  );
+
+  wire [31:0] mem_dmem_rdata = i_dmem_rdata;
+  wire [31:0] mem_dmem_data;
+
+  memory memory (
+    .funct3(mem_funct3),
+    .rs2_data(mem_rs2_data),
+    .alu_result(mem_alu_result),
+    .i_dmem_read_en(mem_dmem_read_en),
+    .i_dmem_write_en(mem_dmem_write_en),
+    .i_dmem_rdata(mem_dmem_rdata),
+    
+    .o_dmem_addr(o_dmem_addr),
+    .o_dmem_ren(o_dmem_ren),
+    .o_dmem_wen(o_dmem_wen),
+    .o_dmem_wdata(o_dmem_wdata),
+    .o_dmem_mask(o_dmem_mask),
+    
+    .dmem_data(mem_dmem_data)
+  );
+  
+  // wb_instr  is defined earlier
+  wire [31:0] wb_pc;
+  // wb_next_pc is defined earlier
+  
+  wire        wb_is_halting;
+
+  wire [31:0] wb_rs1_data;
+  wire [31:0] wb_rs2_data;
+  
+  wire [31:0] wb_retire_dmem_addr;
+  wire        wb_retire_dmem_ren;
+  wire        wb_retire_dmem_wen;
+  wire [ 3:0] wb_retire_dmem_mask;
+  wire [31:0] wb_retire_dmem_wdata;
+  wire [31:0] wb_retire_dmem_rdata;
+  
+  wire [31:0] wb_alu_result;
+
+  wire [31:0] wb_imm_val;
+  wire [31:0] wb_dmem_data;
+  wire        wb_pc_add;
+  wire        wb_alu_src;
+  wire [ 4:0] wb_alu_opsel;
+  
+  // wb_reg_write_en is defined earlier
+  wire [ 1:0] wb_register_write_sel;
+  
+  wire        wb_is_retiring;
+
+  
+  mem_wb_registers #(
+    .NOP_INSTRUCTION(32'h00000013)
+  ) mem_wb_registers (
+    .i_clk(i_clk),
+    
+    .i_instr(mem_instr),
+    .i_pc(mem_pc),
+    .i_next_pc(mem_next_pc),
+
+    .mem_flush(mem_flush),
+    .i_is_halting(mem_is_halting),
+
+    .i_rs1_data(mem_rs1_data),
+    .i_rs2_data(mem_rs2_data),
+    
+    .i_retire_dmem_addr(o_dmem_addr),
+    .i_retire_dmem_ren(o_dmem_ren),
+    .i_retire_dmem_wen(o_dmem_wen),
+    .i_retire_dmem_mask(o_dmem_mask),
+    .i_retire_dmem_wdata(o_dmem_wdata),
+    .i_retire_dmem_rdata(mem_dmem_rdata),
+
+    .i_alu_result(mem_alu_result),
+    .i_imm_val(mem_imm_val),
+    .i_dmem_data(mem_dmem_data),
+    .i_reg_write_en(mem_reg_write_en), // Regiser File control
+    .i_register_write_sel(mem_register_write_sel), 
+    
+    .i_is_retiring(mem_is_retiring),
+
+
+    .o_instr(wb_instr),
+    .o_pc(wb_pc),
+    .o_next_pc(wb_next_pc),
+    
+    .o_is_halting(wb_is_halting),
+
+    
+    .o_rs1_data(wb_rs1_data),
+    .o_rs2_data(wb_rs2_data),
+
+    .o_retire_dmem_addr(wb_retire_dmem_addr),
+    .o_retire_dmem_ren(wb_retire_dmem_ren),
+    .o_retire_dmem_wen(wb_retire_dmem_wen),
+    .o_retire_dmem_mask(wb_retire_dmem_mask),
+    .o_retire_dmem_wdata(wb_retire_dmem_wdata),
+    .o_retire_dmem_rdata(wb_retire_dmem_rdata),
+
+    .o_alu_result(wb_alu_result),
+    .o_imm_val(wb_imm_val),
+    .o_dmem_data(wb_dmem_data),
+    .o_reg_write_en(wb_reg_write_en), // Regiser File control
+    .o_register_write_sel(wb_register_write_sel),
+    
+    .o_is_retiring(wb_is_retiring)
+  );
+  
+  writeback writeback (
+    .register_write_sel(wb_register_write_sel),
+    
+    .pc(wb_pc),
+    .alu_result(wb_alu_result),
+    .imm_val(wb_imm_val),
+    .dmem_rdata(wb_dmem_data),
+    
+    .writeback_data(writeback_data)
 );
-
-	imm_gen ig (.instr(inst), .instr_format(imm_format), .immediate(imm_val));
-
-	alu_control ac (
-		.alu_op(alu_op), .funct3(funct3), .funct7(funct7), .is_immediate(imm_format[1]), .opsel(alu_opsel)
-	);
-
-
-	// alu muxes 
-	assign alu_in_a = (pc_add) ? pc_reg : rs1_data;
-	assign alu_in_b = (alu_src) ? imm_val : rs2_data;
-
-	alu arith_logic_unit (
-		.op1(alu_in_a), .op2(alu_in_b), .opsel(alu_opsel), .result(alu_result)
-	);
-
-	// writeback mux 
-	assign writeback_data = register_write_sel == 2'b00 ? alu_result 
-	                      : register_write_sel == 2'b01 ? pc_plus_4
-	                      : register_write_sel == 2'b10 ? imm_val
-	                      : register_write_sel == 2'b11 ? dmem_rdata //modified to read from read aligner
-	                      : 32'd0;
-                    
-  regfile #( .BYPASS_EN(0)) rf (
-    .clk(i_clk), .rst(i_rst), .rs1_raddr(rs1), .rs2_raddr(rs2), .rd_waddr(rd), .rd_wdata(writeback_data),
-		.rd_wen(reg_write_en), .rs1_rdata(rs1_data), .rs2_rdata(rs2_data)
-	);
 
 	///// trap logic and retire interface /////
 	// None of these logical operators are permitted.
@@ -296,28 +602,36 @@ module hart #(
 	// You will need to check for when a load opcode is used with an invalid funct3 FYI
 	// Should probably check for valid and invalid combinations of: reg_write_en, mem_read_en, and mem_write_en
 	// Should probably check for when a store opcode is used with an invalid funct3 FYI
-	wire trap_unaligned_pc = (jump | branch_taken) & (jump_target[1:0] != 2'b00);
-	wire trap_unaligned_mem = (dmem_read_en | dmem_write_en) &
-			  ((funct3 == 3'b010 & addr_align != 2'b00) |
-			  ((funct3 == 3'b001 | funct3 == 3'b101) & addr_align[0] != 1'b0));
+//	wire trap_unaligned_pc = (jump | branch_taken) & (jump_target[1:0] != 2'b00);
+//	wire trap_unaligned_mem = (dmem_read_en | dmem_write_en) &
+//			  ((funct3 == 3'b010 & addr_align != 2'b00) |
+//			  ((funct3 == 3'b001 | funct3 == 3'b101) & addr_align[0] != 1'b0));
 
-	// illegal instruction check 
-	wire trap_illegal_inst = (inst[1:0] != 2'b11);
+//	// illegal instruction check 
+//	wire trap_illegal_inst = (inst[1:0] != 2'b11);
 
-	assign o_retire_valid = (~i_rst);
-	assign o_retire_inst = inst;
-	assign o_retire_halt = halt;
-  // None of these logical operators are permitted.
-	// We will need to rewrite all of this as massive ternary statements
-	assign o_retire_trap = trap_unaligned_pc | trap_unaligned_mem | trap_illegal_inst | trap_control_unit;
-	assign o_retire_rs1_raddr = rs1;
-	assign o_retire_rs2_raddr = rs2;
-	assign o_retire_rs1_rdata = rs1_data;
-	assign o_retire_rs2_rdata = rs2_data;
-	assign o_retire_rd_waddr = (reg_write_en) ? rd : 5'd0;
-	assign o_retire_rd_wdata = (reg_write_en) ? writeback_data : 32'd0;
-	assign o_retire_pc = pc_reg;
-	assign o_retire_next_pc = next_pc;
+	assign o_retire_valid = (~i_rst) & wb_is_retiring;
+	assign o_retire_inst = wb_instr;
+	assign o_retire_halt = wb_is_halting;
+//  // None of these logical operators are permitted.
+//	// We will need to rewrite all of this as massive ternary statements
+//	assign o_retire_trap = trap_unaligned_pc | trap_unaligned_mem | trap_illegal_inst | trap_control_unit;
+  assign o_retire_trap = 1'b0;
+  assign o_retire_rs1_raddr = wb_instr[19:15];
+	assign o_retire_rs2_raddr = wb_instr[24:20];
+	assign o_retire_rs1_rdata = wb_rs1_data;
+	assign o_retire_rs2_rdata = wb_rs2_data;
+	assign o_retire_rd_waddr = (wb_reg_write_en) ? wb_instr[11:7] : 5'd0;
+	assign o_retire_rd_wdata = (wb_reg_write_en) ? writeback_data : 32'd0;
+  assign o_retire_dmem_addr = wb_retire_dmem_addr;
+  assign o_retire_dmem_ren = wb_retire_dmem_ren;
+  assign o_retire_dmem_wen = wb_retire_dmem_wen;
+  assign o_retire_dmem_mask = wb_retire_dmem_mask;
+  assign o_retire_dmem_wdata = wb_retire_dmem_wdata;
+  assign o_retire_dmem_rdata = wb_retire_dmem_rdata;
+	assign o_retire_pc = wb_pc;
+	assign o_retire_next_pc = wb_next_pc;
+
 	
 endmodule
 

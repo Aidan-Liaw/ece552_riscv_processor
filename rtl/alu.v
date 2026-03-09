@@ -18,13 +18,12 @@
 module alu (
   input wire [31:0] op1,
   input wire [31:0] op2,
-  input wire [5:0] opsel,
+  input wire [4:0] opsel,
   output wire [31:0] result
 );
 
-  wire is_arith = opsel[5];
-  wire is_sub = opsel[4];
-  wire is_unsigned = opsel[3];
+  wire is_arith = opsel[4];
+  wire is_sub = opsel[3];
   wire [2:0] alu_op = opsel[2:0];
   
   wire [31:0] ls_result;
@@ -71,7 +70,7 @@ module alu (
         // Otherwise, MSBit of op1 will eliminate the remaining two options:
         // op1, op2 = 1, 0 means op1 is smaller
         // op1, op2 = 0, 1 means op1 is larger
-        //op2[31] was used instead of op2[30] so magnitude was not properly compared
+        // op2[31] was used instead of op2[30] so magnitude was not properly compared
         result_reg = op1[31] == op2[31] ? {31'd0, op1[30:0] < op2[30:0]} : {31'd0, op1[31] == 1'b1};
 
       //sltu
