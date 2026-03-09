@@ -27,11 +27,11 @@ module branch_hazard_detector(
 
     wire hazard;
     //if id/ex.writereg = if/id.regrs1 or rs2
-    assign hazard = ((id_ex_regwrite && id_ex_rd != 5'b00000 && ((id_ex_rd == rs1 && rs1_rd) || (id_ex_rd == rs2 && rs2_rd)))
+    assign hazard = ((id_ex_regwrite && (id_ex_rd != 5'b00000) && ((id_ex_rd == rs1 && rs1_rd) || (id_ex_rd == rs2 && rs2_rd)))
             //if ex/mem.writereg = if/id.regrs1 or rs2
-            || (ex_mem_regwrite && ex_mem_rd != 5'b00000 && ((ex_mem_rd == rs1 && rs1_rd)|| (ex_mem_rd == rs2 && rs2_rd)))
+            || (ex_mem_regwrite && (ex_mem_rd != 5'b00000) && ((ex_mem_rd == rs1 && rs1_rd)|| (ex_mem_rd == rs2 && rs2_rd)))
             //if mem/wb.writereg = if/id.regrs1 or rs2
-            || (mem_wb_regwrite && mem_wb_rd != 5'b00000 && ((mem_wb_rd == rs1 && rs1_rd)|| (mem_wb_rd == rs2 && rs2_rd))));
+            || (mem_wb_regwrite && (mem_wb_rd != 5'b00000) && ((mem_wb_rd == rs1 && rs1_rd)|| (mem_wb_rd == rs2 && rs2_rd))));
 
     always @(*) begin
         case (hazard) 
