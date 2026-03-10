@@ -149,6 +149,11 @@ module hart #(
 	wire        if_halt; // ?
 	
   wire        pc_write_en;
+  wire        is_jump_or_branch;
+  
+  wire [31:0] id_instr;
+  wire [31:0] id_pc;
+  wire [31:0] id_ex_next_pc;
   
   wire [31:0] wb_next_pc;
 	
@@ -159,7 +164,8 @@ module hart #(
     .i_rst(i_rst),
     .halt(halt),
     
-    .next_pc(wb_next_pc),
+    .target_pc(id_ex_next_pc),
+    .is_jump_or_branch(is_jump_or_branch),
     .pc_write_en(pc_write_en),
     
     .pc(if_pc),
@@ -171,9 +177,7 @@ module hart #(
 	wire        if_flush;
   wire        if_id_write_en;
   wire [31:0] if_id_instr = i_imem_rdata;
-  
-  wire [31:0] id_instr;
-  wire [31:0] id_pc;
+
   
   if_id_registers #(
     .NOP_INSTRUCTION(32'h00000013)
@@ -190,8 +194,10 @@ module hart #(
     .o_pc(id_pc)
   );
   
-  // id_instr, id_pc, are all defined earlier
-  wire [31:0] id_next_pc;
+  // id_instr, id_pc, id_ex_next_pc, are all defined earlier
+//  wire [31:0] id_ex_instr;
+//  wire [31:0] id_ex_pc;
+//  wire [31:0] id_ex_next_pc;
   
   wire [31:0] id_rs1_data;
   wire [31:0] id_rs2_data;
@@ -268,9 +274,10 @@ module hart #(
     .keep_halting(keep_halting),
 
 
-    .o_instr(id_instr),
-    .o_pc(id_pc),
-    .o_next_pc(id_next_pc),
+//    .o_instr(id_ex_instr),
+//    .o_pc(id_ex_pc),
+    .o_next_pc(id_ex_next_pc),
+    .o_is_jump_or_branch(is_jump_or_branch),
 
     // Register data
     .rs1_data(id_rs1_data),
@@ -329,10 +336,11 @@ module hart #(
     .NOP_INSTRUCTION(32'h00000013)
   ) id_ex_registers (
     .i_clk(i_clk),
+    .i_rst(i_rst),
     
     .i_instr(id_instr),
     .i_pc(id_pc),
-    .i_next_pc(id_next_pc),
+    .i_next_pc(id_ex_next_pc),
     
     .id_flush(id_flush),
     .cu_passthrough_en(cu_passthrough_en),
@@ -428,6 +436,7 @@ module hart #(
     .NOP_INSTRUCTION(32'h00000013)
   ) ex_mem_registers (
     .i_clk(i_clk),
+    .i_rst(i_rst),
 
     .i_instr(ex_instr),
     .i_pc(ex_pc),
@@ -532,6 +541,7 @@ module hart #(
     .NOP_INSTRUCTION(32'h00000013)
   ) mem_wb_registers (
     .i_clk(i_clk),
+    .i_rst(i_rst),
     
     .i_instr(mem_instr),
     .i_pc(mem_pc),

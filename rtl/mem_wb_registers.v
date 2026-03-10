@@ -21,9 +21,11 @@
 
 
 module mem_wb_registers #(
+  parameter RESET_ADDR = 32'h00000000,
   parameter NOP_INSTRUCTION = 32'h00000013
 ) (
   input  wire        i_clk,
+  input  wire        i_rst,
   
   input  wire [31:0] i_instr,
   input  wire [31:0] i_pc,
@@ -56,9 +58,9 @@ module mem_wb_registers #(
   input  wire        i_is_retiring,
 
   
-  output reg  [31:0] o_instr,
-  output reg  [31:0] o_pc,
-  output reg  [31:0] o_next_pc,
+  output reg  [31:0] o_instr = NOP_INSTRUCTION,
+  output reg  [31:0] o_pc = RESET_ADDR,
+  output reg  [31:0] o_next_pc = RESET_ADDR + 4,
   
   output reg         o_is_halting,
 
@@ -90,8 +92,10 @@ module mem_wb_registers #(
   always @(posedge i_clk) begin
     o_is_halting <= i_is_halting;
 
-    if (mem_flush) begin
+    if (mem_flush | i_rst) begin
       o_instr <= NOP_INSTRUCTION;
+      o_pc <= i_rst == 1'b1 ? RESET_ADDR : o_pc;
+      o_next_pc <= i_rst == 1'b1 ? RESET_ADDR + 4: o_next_pc;
       
       o_rs1_data <= 32'd0;
       o_rs2_data <= 32'd0;

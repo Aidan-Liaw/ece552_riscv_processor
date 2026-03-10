@@ -20,11 +20,8 @@ module decode (
   
   input  wire        keep_halting,
 
-
-  
-  output wire [31:0] o_instr,
-  output wire [31:0] o_pc,
   output wire [31:0] o_next_pc,
+  output wire        o_is_jump_or_branch,
   
   // Register data
   output wire [31:0] rs1_data,
@@ -57,9 +54,6 @@ module decode (
   output wire        trap_control_unit
 );
 
-  assign o_pc = i_pc;
-  assign o_instr = i_instr;
-
   // instruction decoding wires
   wire [6:0]  opcode = i_instr[6:0];
   wire [4:0]  rd     = i_instr[11:7];
@@ -79,9 +73,11 @@ module decode (
   wire branch; // 0 for non-branch instructions, 1 for branch instructions
   wire jump; // 0 for non-jump instructions, 1 for jump instructions
 
+  assign o_is_jump_or_branch = branch | jump;
   	
   control_unit ctrl (
     // Inputs
+    .i_rst(i_rst),
     .opcode(opcode),
     .funct3(funct3),
     .funct7(funct7),
@@ -123,12 +119,13 @@ module decode (
   wire [31:0] register_jump_target  = (rs1_data + imm_val) & 32'hFFFE; // Clears LSBit
   wire [31:0] immediate_jump_target = i_pc + imm_val;
 	
-	branch_condition_checker branch_condition_checker(branch, funct3, rs1_data, rs2_data, is_branch_taken);
+	branch_condition_checker branch_condition_checker(i_rst, branch, funct3, rs1_data, rs2_data, is_branch_taken);
 	
 	next_pc_setter next_pc_setter(i_pc, opcode, is_branch_taken, jump, 
 	 register_jump_target, immediate_jump_target, o_next_pc);
 
 	branch_hazard_detector branch_hazard_detector(
+	  .i_rst(i_rst),
     .instr(i_instr),
     .imm_format(imm_format),
     .id_ex_rd(id_ex_rd),

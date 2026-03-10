@@ -21,9 +21,11 @@
 
 
 module id_ex_registers #(
+  parameter RESET_ADDR = 32'h00000000,
   parameter NOP_INSTRUCTION = 32'h00000013
 ) (
   input  wire        i_clk,
+  input  wire        i_rst,
   
   input  wire [31:0] i_instr,
   input  wire [31:0] i_pc,
@@ -51,9 +53,9 @@ module id_ex_registers #(
   input  wire [ 1:0] i_register_write_sel, 
 
   
-  output reg  [31:0] o_instr,
-  output reg  [31:0] o_pc,
-  output reg  [31:0] o_next_pc,
+  output reg  [31:0] o_instr = NOP_INSTRUCTION,
+  output reg  [31:0] o_pc = RESET_ADDR,
+  output reg  [31:0] o_next_pc = RESET_ADDR + 4,
   
   output reg         o_is_halting,
 
@@ -63,7 +65,7 @@ module id_ex_registers #(
   output reg  [31:0] o_rs2_data,
   
   // Control Unit wires
-  output wire        keep_halting,
+  output reg        keep_halting = 1'b0,
   // Execute stage control
   output reg  [31:0] o_imm_val,
   output reg         o_pc_add, // 0 for rs1_data, 1 for PC
@@ -79,17 +81,19 @@ module id_ex_registers #(
   
   output reg         o_is_retiring
 );
-
-  reg keep_halting_reg = 1'b0;
   
-  assign keep_halting = keep_halting_reg;
+  initial begin
+    keep_halting <= 1'b0;
+  end
   
   always @(posedge i_clk) begin
-    keep_halting_reg <= i_is_halting;
-    o_is_halting <= i_is_halting;
+    keep_halting <= i_rst == 1'b1 ? 0 : i_is_halting;
+    o_is_halting <= i_rst == 1'b1 ? 0 : i_is_halting;
 
-    if (id_flush | cu_passthrough_en) begin
+    if (id_flush | (~cu_passthrough_en & ~i_rst) | i_rst) begin
       o_instr <= NOP_INSTRUCTION;
+      o_pc <= i_rst == 1'b1 ? RESET_ADDR : o_pc;
+      o_next_pc <= i_rst == 1'b1 ? RESET_ADDR + 4: o_next_pc;
             
       o_rs1_data <= 32'd0;
       o_rs2_data <= 32'd0;

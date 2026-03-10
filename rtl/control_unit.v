@@ -3,6 +3,7 @@
 `default_nettype wire
 
 module control_unit (
+  input wire       i_rst,
   input wire [6:0] opcode,
   input wire [2:0] funct3,
   input wire [6:0] funct7,
@@ -61,6 +62,7 @@ module control_unit (
     write_reg_sel = 2'b00;
     halt_generate = 1'b0;
     alu_src = 1'b0;
+    alu_opsel = 5'd0;
     
     if_flush = 1'b0;
     id_flush = 1'b0;
@@ -69,8 +71,33 @@ module control_unit (
     
     trap = 1'b0;
     
-    case (keep_halting)
-      1'b1: begin
+    casez ({i_rst, keep_halting})
+      // Bad. 1'bx is not synthesizeable, and random.
+      // However, I cannot force the register
+      2'b1?: begin
+        reg_write_en = 1'b0;
+        imm_format = 6'b0;
+        pc_add = 1'b0;
+        branch = 1'b0;
+        jump = 1'b0;
+        mem_read_en = 1'b0;
+        mem_write_en = 1'b0;
+        //alu = 00, dmem = 11, imm = 10, pc + 4 = 01
+        write_reg_sel = 2'b00;
+        halt_generate = 1'b0;
+        alu_src = 1'b0;
+        alu_opsel = 5'd0;
+        
+        // Questionable...
+        if_flush = 1'b0;
+        id_flush = 1'b0;
+        ex_flush = 1'b0;
+        mem_flush = 1'b0;
+        
+        trap = 1'b0;
+      end
+      2'b00: begin
+//      1'b0, 1'bx: begin
         case (opcode)
           // r-type arithmetic
           7'b011_0011: begin

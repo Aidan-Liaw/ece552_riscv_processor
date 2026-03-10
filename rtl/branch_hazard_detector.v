@@ -1,6 +1,7 @@
 `timescale 1ns / 1ps
 
 module branch_hazard_detector(
+    input wire        i_rst,
     input wire [31:0] instr,
     input wire [ 5:0] imm_format,
     input wire [ 4:0] id_ex_rd,
@@ -34,7 +35,7 @@ module branch_hazard_detector(
                     | (mem_wb_reg_write & (mem_wb_rd != 5'b00000) & (((mem_wb_rd == rs1) & rs1_rd) | ((mem_wb_rd == rs2) & rs2_rd))));
 
     always @(*) begin
-        case (hazard) 
+        case (hazard | i_rst) 
             1'b1: begin
                 pc_write_en = 0;
                 if_id_write_en = 0;

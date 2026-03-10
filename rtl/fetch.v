@@ -9,7 +9,8 @@ module fetch #(
   input  wire        i_rst,
   input  wire        halt,
   
-  input  wire [31:0] next_pc,
+  input  wire [31:0] target_pc,
+  input  wire        is_jump_or_branch,
   input  wire        pc_write_en,
   
   output wire [31:0] pc,
@@ -24,9 +25,13 @@ module fetch #(
   always @(posedge i_clk) begin
 		if (i_rst) begin
 			pc_reg <= RESET_ADDR;
-		end else if ((~halt) & pc_write_en) begin
-			pc_reg <= next_pc;
-		end
+		end else if ((~halt) & pc_write_en & is_jump_or_branch) begin
+			pc_reg <= target_pc;
+		end else if ((~halt) & pc_write_en & (~is_jump_or_branch)) begin
+			pc_reg <= pc_plus_4;
+    end else begin
+      pc_reg <= pc_reg;
+    end 
 	end
 	
 endmodule
