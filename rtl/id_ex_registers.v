@@ -112,9 +112,9 @@ module id_ex_registers #(
       
       o_is_retiring <= 1'b0;
     end else begin
-      o_instr = i_instr;
-      o_pc = i_pc;
-      o_next_pc = i_next_pc;
+      o_instr <= i_instr;
+      o_pc <= i_pc;
+      o_next_pc <= i_next_pc;
       
       o_rs1_data <= i_rs1_data;
       o_rs2_data <= i_rs2_data;
@@ -131,7 +131,8 @@ module id_ex_registers #(
       o_reg_write_en <= i_reg_write_en;
       o_register_write_sel <= i_register_write_sel;
       
-      o_is_retiring <= 1'b1;
+      //basicially in our trace we were always retiring a nop at first
+      o_is_retiring <= (i_instr != 32'h00000013);
     end
   end
 

@@ -103,9 +103,9 @@ module ex_mem_registers #(
       
       o_is_retiring <= 1'b0;
     end else begin
-      o_instr = i_instr;
-      o_pc = i_pc;
-      o_next_pc = i_next_pc;
+      o_instr <= i_instr;
+      o_pc <= i_pc;
+      o_next_pc <= i_next_pc;
       
       o_rs1_data <= i_rs1_data;
       o_rs2_data <= i_rs2_data;

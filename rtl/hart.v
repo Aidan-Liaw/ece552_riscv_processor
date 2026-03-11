@@ -231,24 +231,28 @@ module hart #(
   wire        ex_halt;
   wire        ex_dmem_read_en;
   wire        ex_reg_write_en;
-  wire [ 4:0] ex_rd = (ex_instr == 7'b010_0011) | (ex_instr == 7'b110_0011) 
+  //for the next three rd signals:
+  //the bit width was comparing a 32 bit with a 7 bit so just added in the [6:0]
+  //the logic was backwards it was assigning 1 if it was a branch or store
+  //also using | instead of & which made it always true
+  wire [ 4:0] ex_rd = (ex_instr[6:0] != 7'b010_0011) & (ex_instr[6:0] != 7'b110_0011) 
                        ? ex_instr[11:7] 
-                       : 7'd0;
+                       : 5'd0;
                        
   wire [31:0] mem_instr;
   wire        mem_halt;
   wire        mem_dmem_read_en;
   wire        mem_reg_write_en;
-  wire [ 4:0] mem_rd = (mem_instr == 7'b010_0011) | (mem_instr == 7'b110_0011) 
+  wire [ 4:0] mem_rd = (mem_instr[6:0] != 7'b010_0011) & (mem_instr[6:0] != 7'b110_0011) 
                         ? mem_instr[11:7] 
-                        : 7'd0;
+                        : 5'd0;
    
   wire [31:0] wb_instr;
   wire        wb_halt;
   wire        wb_reg_write_en;
-  wire [ 4:0] wb_rd = (wb_instr == 7'b010_0011) | (wb_instr == 7'b110_0011) 
+  wire [ 4:0] wb_rd = (wb_instr[6:0] != 7'b010_0011) & (wb_instr[6:0] != 7'b110_0011) 
                      ? wb_instr[11:7] 
-                     : 7'd0;
+                     : 5'd0;
                      
   wire [31:0] writeback_data;
 
@@ -642,7 +646,7 @@ module hart #(
 	assign o_retire_pc = wb_pc;
 	assign o_retire_next_pc = wb_next_pc;
 
-	
+  
 endmodule
 
 `default_nettype wire
