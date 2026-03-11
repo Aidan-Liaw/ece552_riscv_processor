@@ -104,6 +104,10 @@ module control_unit (
             reg_write_en = 1'b1;
             imm_format = 6'b000001; 
             write_reg_sel = 2'b00; 
+
+            alu_opsel = (funct3 == 3'b000 && funct7[5] == 1'b1) ? {1'b0, 1'b1, funct3} :
+                        (funct3 == 3'b101 && funct7[5] == 1'b1) ? {1'b1, 1'b0, funct3} :
+                        {1'b0, 1'b0, funct3};
           end
     
           // i-type arithmetic
@@ -112,6 +116,9 @@ module control_unit (
             alu_src = 1'b1;
             imm_format = 6'b000010;
             write_reg_sel = 2'b00;
+
+            alu_opsel = (funct3 == 3'b101 && funct7[5] == 1'b1) ? {1'b1, 1'b0, funct3} : 
+                        {1'b0, 1'b0, funct3};
           end
           
           // lui
@@ -209,24 +216,24 @@ module control_unit (
     endcase      
   end
   
-  always @(*) begin
-    is_sub = 1'b0;
-    is_arith = 1'b0;
+  // always @(*) begin
+  //   is_sub = 1'b0;
+  //   is_arith = 1'b0;
 
-    case (alu_op)
-      //addition/subtraction if `is_sub` asserted
-      3'b000: is_sub = funct7[5] & is_reg_arith;
+  //   case (alu_op)
+  //     //addition/subtraction if `is_sub` asserted
+  //     3'b000: is_sub = funct7[5] & is_reg_arith;
 
-      //shift right logical/arithmetic if `is_arith` asserted
-      3'b101: is_arith = funct7[5];
+  //     //shift right logical/arithmetic if `is_arith` asserted
+  //     3'b101: is_arith = funct7[5];
       
-      default: begin
-        is_sub = 1'b0;
-        is_arith = 1'b0;
-      end
-    endcase
+  //     default: begin
+  //       is_sub = 1'b0;
+  //       is_arith = 1'b0;
+  //     end
+  //   endcase
     
-    alu_opsel = {is_arith, is_sub, alu_op};
-  end
+  //   alu_opsel = {is_arith, is_sub, alu_op};
+  // end
 
 endmodule 
