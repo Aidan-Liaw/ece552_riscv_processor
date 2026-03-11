@@ -73,7 +73,7 @@ module decode (
   wire branch; // 0 for non-branch instructions, 1 for branch instructions
   wire jump; // 0 for non-jump instructions, 1 for jump instructions
 
-  // assign o_is_jump_or_branch = branch | jump;
+  wire cu_if_flush;
   	
   control_unit ctrl (
     // Inputs
@@ -104,7 +104,7 @@ module decode (
     .write_reg_sel(register_write_sel),
     
     // Flush Signals
-    .if_flush(if_flush),
+    .if_flush(cu_if_flush),
     .id_flush(id_flush),
     .ex_flush(ex_flush),
     .mem_flush(mem_flush),
@@ -121,7 +121,11 @@ module decode (
 	
 	branch_condition_checker branch_condition_checker(i_rst, branch, funct3, rs1_data, rs2_data, is_branch_taken);
 	
-  assign o_is_jump_or_branch = (branch & is_branch_taken) | jump;
+  // only trigger a jump if the branch is taken and the pipeline is not stalled
+  assign o_is_jump_or_branch = ((branch & is_branch_taken) | jump) & cu_passthrough_en;
+
+  // safely combine the cu flush with our jump flush
+  assign if_flush = cu_if_flush | o_is_jump_or_branch;
 
 	next_pc_setter next_pc_setter(i_pc, opcode, is_branch_taken, jump, 
 	 register_jump_target, immediate_jump_target, o_next_pc);
@@ -152,7 +156,7 @@ module decode (
 	
   imm_gen ig (.instr(i_instr), .instr_format(imm_format), .immediate(imm_val));
 
-
+  //assign if_flush = cu_if_flush | o_is_jump_or_branch;
  
 	
 endmodule
