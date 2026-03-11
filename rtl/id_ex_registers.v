@@ -52,6 +52,7 @@ module id_ex_registers #(
   input  wire        i_reg_write_en, // Regiser File control, i_id_ex_reg_write
   input  wire [ 1:0] i_register_write_sel, 
 
+  input wire i_is_retiring,
   
   output reg  [31:0] o_instr = NOP_INSTRUCTION,
   output reg  [31:0] o_pc = RESET_ADDR,

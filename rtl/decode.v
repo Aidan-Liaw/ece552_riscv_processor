@@ -73,7 +73,7 @@ module decode (
   wire branch; // 0 for non-branch instructions, 1 for branch instructions
   wire jump; // 0 for non-jump instructions, 1 for jump instructions
 
-  assign o_is_jump_or_branch = branch | jump;
+  // assign o_is_jump_or_branch = branch | jump;
   	
   control_unit ctrl (
     // Inputs
@@ -121,6 +121,8 @@ module decode (
 	
 	branch_condition_checker branch_condition_checker(i_rst, branch, funct3, rs1_data, rs2_data, is_branch_taken);
 	
+  assign o_is_jump_or_branch = (branch & is_branch_taken) | jump;
+
 	next_pc_setter next_pc_setter(i_pc, opcode, is_branch_taken, jump, 
 	 register_jump_target, immediate_jump_target, o_next_pc);
 
@@ -139,9 +141,13 @@ module decode (
     .cu_passthrough_en(cu_passthrough_en)
   );
 		
-  regfile #( .BYPASS_EN(0)) rf (
-    .clk(i_clk), .rst(i_rst), .rs1_raddr(rs1), .rs2_raddr(rs2), .rd_waddr(rd), .rd_wdata(writeback_data),
-		.rd_wen(reg_write_en), .rs1_rdata(rs1_data), .rs2_rdata(rs2_data)
+    /* CHANGED: 
+     * .rd_waddr(rd) to .rd_waddr(mem_wb_rd) 
+     * .rd_en(reg_write_en) to .rd_en(mem_wb_reg_write)
+     */
+  regfile #( .BYPASS_EN(1)) rf (
+    .clk(i_clk), .rst(i_rst), .rs1_raddr(rs1), .rs2_raddr(rs2), .rd_waddr(mem_wb_rd), .rd_wdata(writeback_data),
+		.rd_wen(mem_wb_reg_write), .rs1_rdata(rs1_data), .rs2_rdata(rs2_data)
 	);
 	
   imm_gen ig (.instr(i_instr), .instr_format(imm_format), .immediate(imm_val));

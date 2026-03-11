@@ -341,6 +341,8 @@ module hart #(
   ) id_ex_registers (
     .i_clk(i_clk),
     .i_rst(i_rst),
+
+    .i_is_retiring(cu_passthrough_en),
     
     .i_instr(id_instr),
     .i_pc(id_pc),
@@ -631,8 +633,14 @@ module hart #(
 //	// We will need to rewrite all of this as massive ternary statements
 //	assign o_retire_trap = trap_unaligned_pc | trap_unaligned_mem | trap_illegal_inst | trap_control_unit;
   assign o_retire_trap = 1'b0;
-  assign o_retire_rs1_raddr = wb_instr[19:15];
-	assign o_retire_rs2_raddr = wb_instr[24:20];
+
+  // if the instruction does not read from a register file, this should be 5'd0
+  wire [6:0] wb_opcode = wb_instr[6:0];  // opcode of instr in WB stage
+  wire wb_uses_rs1 = (wb_opcode != 7'b0110111) & (wb_opcode != 7'b0010111) & (wb_opcode != 7'b1101111);  // rs1 not used be lui, auipc, or jal
+  wire wb_uses_rs2 = (wb_opcode == 7'b0110011) | (wb_opcode == 7'b0100011) | (wb_opcode == 7'b1100011);  // rs2 only used by r-type, s-type, and b-type
+  assign o_retire_rs1_raddr = (wb_uses_rs1) ? wb_instr[19:15] : 5'd0;
+	assign o_retire_rs2_raddr = (wb_uses_rs2) ? wb_instr[24:20] : 5'd0;
+
 	assign o_retire_rs1_rdata = wb_rs1_data;
 	assign o_retire_rs2_rdata = wb_rs2_data;
 	assign o_retire_rd_waddr = (wb_reg_write_en) ? wb_instr[11:7] : 5'd0;
