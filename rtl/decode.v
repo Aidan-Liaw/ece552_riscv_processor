@@ -116,7 +116,8 @@ module decode (
   	
   ///// branch and next pc logic /////
   wire is_branch_taken;
-  wire [31:0] register_jump_target  = (rs1_data + imm_val) & 32'hFFFE; // Clears LSBit
+  //slight fix 
+  wire [31:0] register_jump_target  = (rs1_data + imm_val) & 32'hFFFFFFFE; // Clears LSBit
   wire [31:0] immediate_jump_target = i_pc + imm_val;
 	
 	branch_condition_checker branch_condition_checker(i_rst, branch, funct3, rs1_data, rs2_data, is_branch_taken);

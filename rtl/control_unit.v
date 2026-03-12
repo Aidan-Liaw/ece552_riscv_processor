@@ -175,7 +175,8 @@ module control_unit (
             jump = 1'b1;
             write_reg_sel = 2'b01;
             alu_src = 1'b1;
-            if_flush = 1'b1;
+            //jalr was being flushed so it wasn't being executed at all
+           //if_flush = 1'b1;
           end
     
           // EBREAK
