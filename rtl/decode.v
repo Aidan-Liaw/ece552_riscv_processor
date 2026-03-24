@@ -9,9 +9,12 @@ module decode (
   input  wire [31:0] i_instr,
   input  wire [31:0] i_pc,
   
-//  input  wire        id_ex_mem_read,
+  input  wire [31:0] id_forward_data,
+  input  wire [ 1:0] id_forward_sel,
+
   input  wire [ 4:0] id_ex_rd,
   input  wire        id_ex_reg_write,
+  input  wire        id_ex_mem_read,
   input  wire [ 4:0] ex_mem_rd,
   input  wire        ex_mem_reg_write,
   input  wire [ 4:0] mem_wb_rd,
@@ -21,6 +24,8 @@ module decode (
   input  wire        keep_halting,
 
   output wire [31:0] o_next_pc,
+  output wire        o_is_jump,
+  output wire        o_is_branch,
   output wire        o_is_jump_or_branch,
   
   // Register data
@@ -117,12 +122,18 @@ module decode (
   ///// branch and next pc logic /////
   wire is_branch_taken;
   //slight fix 
-  wire [31:0] register_jump_target  = (rs1_data + imm_val) & 32'hFFFFFFFE; // Clears LSBit
+  wire [31:0] register_jump_base_address = id_forward_sel[0] == 1'b1 ? id_forward_data : rs1_data;
+  wire [31:0] register_jump_target  = (register_jump_base_address + imm_val) & 32'hFFFFFFFE; // Clears LSBit
   wire [31:0] immediate_jump_target = i_pc + imm_val;
 	
-	branch_condition_checker branch_condition_checker(i_rst, branch, funct3, rs1_data, rs2_data, is_branch_taken);
+	// TODO:
+	wire [31:0] rs1_branch = id_forward_sel[0] == 1'b1 ? id_forward_data : rs1_data;
+  wire [31:0] rs2_branch = id_forward_sel[1] == 1'b1 ? id_forward_data : rs2_data;
+	branch_condition_checker branch_condition_checker(i_rst, branch, funct3, rs1_branch, rs2_branch, is_branch_taken);
 	
   // only trigger a jump if the branch is taken and the pipeline is not stalled
+  assign o_is_jump = jump & cu_passthrough_en;
+  assign o_is_branch = branch & is_branch_taken & cu_passthrough_en;
   assign o_is_jump_or_branch = ((branch & is_branch_taken) | jump) & cu_passthrough_en;
 
   // safely combine the cu flush with our jump flush
@@ -135,12 +146,8 @@ module decode (
 	  .i_rst(i_rst),
     .instr(i_instr),
     .imm_format(imm_format),
+    .id_ex_mem_read(id_ex_mem_read),
     .id_ex_rd(id_ex_rd),
-    .id_ex_reg_write(id_ex_reg_write),
-    .ex_mem_rd(ex_mem_rd),
-    .ex_mem_reg_write(ex_mem_reg_write),
-    .mem_wb_rd(mem_wb_rd),
-    .mem_wb_reg_write(mem_wb_reg_write),
     .if_id_write_en(if_id_write_en),
     .pc_write_en(pc_write_en),
     .cu_passthrough_en(cu_passthrough_en)

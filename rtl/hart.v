@@ -149,13 +149,104 @@ module hart #(
 	wire        if_halt; // ?
 	
   wire        pc_write_en;
+  wire        is_jump;
+  wire        is_branch;
   wire        is_jump_or_branch;
   
-  wire [31:0] id_instr;
+  wire [31:0] id_instr;  
   wire [31:0] id_pc;
   wire [31:0] id_ex_next_pc;
+  wire [ 4:0] id_rd = (id_instr[6:0] != 7'b010_0011) & (id_instr[6:0] != 7'b110_0011) 
+                 ? id_instr[11:7] 
+                 : 5'd0;
+
+  wire [31:0] ex_instr;
+  wire [31:0] ex_pc;
   
+  wire [31:0] mem_instr;
+  wire [31:0] mem_pc;
+  wire        mem_reg_write_en;
+  wire        mem_dmem_write_en;
+  wire [ 4:0] mem_rd = (mem_instr[6:0] != 7'b010_0011) & (mem_instr[6:0] != 7'b110_0011) 
+                        ? mem_instr[11:7] 
+                        : 5'd0;
+  wire [31:0] mem_alu_result;
+
+
+
+  wire [31:0] wb_instr;
+  wire [31:0] wb_pc;
   wire [31:0] wb_next_pc;
+  wire        wb_reg_write_en;
+  wire [ 4:0] wb_rd = (wb_instr[6:0] != 7'b010_0011) & (wb_instr[6:0] != 7'b110_0011) 
+                     ? wb_instr[11:7] 
+                     : 5'd0;
+  wire [31:0] wb_dmem_data;
+
+
+  wire [31:0] id_forward_data;
+  wire [ 1:0] id_forward_sel;
+
+  wire [31:0] ex_forward_data;
+  wire [ 1:0] ex_forward_sel;
+
+  wire [31:0] mem_forward_data;
+  wire        mem_forward_sel;
+
+  
+  wire [ 9:0] if_id_rs;
+  wire [ 9:0] id_ex_rs;
+  wire [ 9:0] ex_mem_rs;
+  
+  // rs1
+  assign if_id_rs[4:0] = ((id_instr[6:0] != 7'b011_0111) | (id_instr[6:0] != 7'b001_0111) | (id_instr[6:0] != 7'b110_1111))
+                          ? id_instr[19:15] : 5'd0;
+  assign id_ex_rs[4:0] = ((ex_instr[6:0] != 7'b011_0111) | (ex_instr[6:0] != 7'b001_0111) | (ex_instr[6:0] != 7'b110_1111))
+                          ? ex_instr[19:15] : 5'd0;
+  assign ex_mem_rs[4:0] = ((mem_instr[6:0] != 7'b011_0111) | (mem_instr[6:0] != 7'b001_0111) | (mem_instr[6:0] != 7'b110_1111))
+                          ? mem_instr[19:15] : 5'd0;
+
+  // rs2
+  assign if_id_rs[9:5] = ((id_instr[6:0] != 7'b011_0111) | (id_instr[6:0] != 7'b001_0111) | (id_instr[6:0] != 7'b110_1111) | (id_instr[6:0] != 7'b001_0011))
+                          ? id_instr[24:20] : 5'd0;
+  assign id_ex_rs[9:5] = ((ex_instr[6:0] != 7'b011_0111) | (ex_instr[6:0] != 7'b001_0111) | (ex_instr[6:0] != 7'b110_1111) | (ex_instr[6:0] != 7'b001_0011))
+                          ? ex_instr[24:20] : 5'd0;
+  assign ex_mem_rs[9:5] = ((mem_instr[6:0] != 7'b011_0111) | (mem_instr[6:0] != 7'b001_0111) | (mem_instr[6:0] != 7'b110_1111) | (mem_instr[6:0] != 7'b001_0011))
+                          ? mem_instr[24:20] : 5'd0;
+  
+  forwarding_unit forwarding_unit (
+    .if_id_rs(if_id_rs),
+    .is_jump(is_jump),
+    .is_branch(is_branch),
+
+    .id_ex_instr(ex_instr),
+    .id_ex_pc(ex_pc),
+    .id_ex_rs(id_ex_rs),
+
+    .ex_mem_instr(mem_instr),
+    .ex_mem_pc(mem_pc),
+    .ex_mem_rs(ex_mem_rs),
+    .ex_mem_rd(mem_rd),
+    .ex_mem_data(mem_alu_result),
+    .ex_mem_reg_write(mem_reg_write_en),
+    .ex_mem_mem_write(mem_dmem_write_en),
+
+    .mem_wb_instr(wb_instr),
+    .mem_wb_pc(wb_pc),
+    .mem_wb_rd(wb_rd),
+    .mem_wb_data(wb_dmem_data),
+    .mem_wb_reg_write(wb_reg_write_en),
+
+
+    .id_forward_data(id_forward_data),
+    .id_forward_sel(id_forward_sel),
+
+    .ex_forward_data(ex_forward_data),
+    .ex_forward_sel(ex_forward_sel),
+
+    .mem_forward_data(mem_forward_data),
+    .mem_forward_sel(mem_forward_sel)
+  );
 	
 	fetch  #(
     .RESET_ADDR(32'h00000000)
@@ -227,7 +318,7 @@ module hart #(
   
   wire        trap_control_unit;
 
-  wire [31:0] ex_instr;
+  // ex_instr is defined earlier
   wire        ex_halt;
   wire        ex_dmem_read_en;
   wire        ex_reg_write_en;
@@ -239,20 +330,14 @@ module hart #(
                        ? ex_instr[11:7] 
                        : 5'd0;
                        
-  wire [31:0] mem_instr;
+  // mem_instr is defined earlier
   wire        mem_halt;
   wire        mem_dmem_read_en;
-  wire        mem_reg_write_en;
-  wire [ 4:0] mem_rd = (mem_instr[6:0] != 7'b010_0011) & (mem_instr[6:0] != 7'b110_0011) 
-                        ? mem_instr[11:7] 
-                        : 5'd0;
-   
-  wire [31:0] wb_instr;
+  // mem_reg_write_en and mem_rd are defined earlier
+
+  // wb_instr is defined earlier
   wire        wb_halt;
-  wire        wb_reg_write_en;
-  wire [ 4:0] wb_rd = (wb_instr[6:0] != 7'b010_0011) & (wb_instr[6:0] != 7'b110_0011) 
-                     ? wb_instr[11:7] 
-                     : 5'd0;
+  // wb_reg_write_en and wb_rd are defined earlier
                      
   wire [31:0] writeback_data;
 
@@ -262,10 +347,13 @@ module hart #(
     
     .i_instr(id_instr),
     .i_pc(id_pc),
+    
+    .id_forward_data(id_forward_data), 
+    .id_forward_sel(id_forward_sel),  
 
-//    .id_ex_mem_read(ex_dmem_read_en),
     .id_ex_rd(ex_rd),
     .id_ex_reg_write(ex_reg_write_en),
+    .id_ex_mem_read(ex_dmem_read_en),
     
     .ex_mem_rd(mem_rd),
     .ex_mem_reg_write(mem_reg_write_en),
@@ -281,6 +369,8 @@ module hart #(
 //    .o_instr(id_ex_instr),
 //    .o_pc(id_ex_pc),
     .o_next_pc(id_ex_next_pc),
+    .o_is_jump(is_jump),
+    .o_is_branch(is_branch),
     .o_is_jump_or_branch(is_jump_or_branch),
 
     // Register data
@@ -314,7 +404,7 @@ module hart #(
   );
   
   // ex_instr is defined earlier
-  wire [31:0] ex_pc;
+  // ex_pc is defined earlier
   wire [31:0] ex_next_pc;
   
   wire        ex_is_halting;
@@ -398,12 +488,15 @@ module hart #(
   
   wire [31:0] ex_alu_result;
   
+  wire [31:0] ex_rs1_with_forwarding = ex_forward_sel[0] == 1'b1 ? ex_forward_data : ex_rs1_data;
+  wire [31:0] ex_rs2_with_forwarding = ex_forward_sel[1] == 1'b1 ? ex_forward_data : ex_rs2_data;
+  
   execute execute (
     .pc(ex_pc),
     .imm_val(ex_imm_val),
     
-    .rs1_data(ex_rs1_data),
-    .rs2_data(ex_rs2_data),
+    .rs1_data(ex_rs1_with_forwarding),
+    .rs2_data(ex_rs2_with_forwarding),
     
     .pc_add(ex_pc_add), // 0 for rs1_data, 1 for PC
     .alu_src(ex_alu_src), // 0 for rs2_data, 1 for immediate
@@ -413,7 +506,7 @@ module hart #(
   );
   
   // mem_instr is dfined earlier
-  wire [31:0] mem_pc;
+  // mem_pc is defined earlier
   wire [31:0] mem_next_pc;
   
   wire        mem_is_halting;
@@ -422,7 +515,7 @@ module hart #(
   wire [31:0] mem_rs1_data;
   wire [31:0] mem_rs2_data;
   
-  wire [31:0] mem_alu_result;
+  // mem_alu_result is defined earlier
 
   wire [31:0] mem_imm_val;
   wire        mem_pc_add;
@@ -430,7 +523,7 @@ module hart #(
   wire [ 4:0] mem_alu_opsel;
 
   // mem_dmem_read_en is defined earlier
-  wire        mem_dmem_write_en;
+  // mem_dmem_write_en is defined earlier
   wire [ 2:0] mem_funct3;
 
   // mem_reg_write_en is defined earlier
@@ -495,10 +588,12 @@ module hart #(
 
   wire [31:0] mem_dmem_rdata = i_dmem_rdata;
   wire [31:0] mem_dmem_data;
-
+  
+  wire [31:0] mem_rs2_with_forwarding = mem_forward_sel == 1'b1 ? mem_forward_data : mem_rs2_data;
+  
   memory memory (
     .funct3(mem_funct3),
-    .rs2_data(mem_rs2_data),
+    .rs2_data(mem_rs2_with_forwarding),
     .alu_result(mem_alu_result),
     .i_dmem_read_en(mem_dmem_read_en),
     .i_dmem_write_en(mem_dmem_write_en),
@@ -513,8 +608,8 @@ module hart #(
     .dmem_data(mem_dmem_data)
   );
   
-  // wb_instr  is defined earlier
-  wire [31:0] wb_pc;
+  // wb_instr is defined earlier
+  // wb_pc is defined earlier
   // wb_next_pc is defined earlier
   
   wire        wb_is_halting;
@@ -532,7 +627,7 @@ module hart #(
   wire [31:0] wb_alu_result;
 
   wire [31:0] wb_imm_val;
-  wire [31:0] wb_dmem_data;
+  // wb_dmem_data is defined earlier
   wire        wb_pc_add;
   wire        wb_alu_src;
   wire [ 4:0] wb_alu_opsel;
