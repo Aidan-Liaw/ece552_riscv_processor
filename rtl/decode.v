@@ -16,6 +16,7 @@ module decode (
   input  wire        id_ex_reg_write,
   input  wire        id_ex_mem_read,
   input  wire [ 4:0] ex_mem_rd,
+  input  wire        ex_mem_mem_read,
   input  wire        ex_mem_reg_write,
   input  wire [ 4:0] mem_wb_rd,
   input  wire        mem_wb_reg_write,
@@ -148,6 +149,9 @@ module decode (
     .imm_format(imm_format),
     .id_ex_mem_read(id_ex_mem_read),
     .id_ex_rd(id_ex_rd),
+    .id_ex_reg_write(id_ex_reg_write),
+    .ex_mem_mem_read(ex_mem_mem_read),
+    .ex_mem_rd(ex_mem_rd),
     .if_id_write_en(if_id_write_en),
     .pc_write_en(pc_write_en),
     .cu_passthrough_en(cu_passthrough_en)

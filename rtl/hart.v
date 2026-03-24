@@ -356,6 +356,7 @@ module hart #(
     .id_ex_mem_read(ex_dmem_read_en),
     
     .ex_mem_rd(mem_rd),
+    .ex_mem_mem_read(mem_dmem_read_en),
     .ex_mem_reg_write(mem_reg_write_en),
     
     .mem_wb_rd(wb_rd),
