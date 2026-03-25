@@ -184,10 +184,12 @@ module hart #(
   wire [31:0] wb_dmem_data;
 
 
-  wire [31:0] id_forward_data;
+  wire [31:0] id_forward_data_rs1;
+  wire [31:0] id_forward_data_rs2; 
   wire [ 1:0] id_forward_sel;
 
-  wire [31:0] ex_forward_data;
+  wire [31:0] ex_forward_data_rs1;
+  wire [31:0] ex_forward_data_rs2;
   wire [ 1:0] ex_forward_sel;
 
   wire [31:0] mem_forward_data;
@@ -199,19 +201,19 @@ module hart #(
   wire [ 9:0] ex_mem_rs;
   
   // rs1
-  assign if_id_rs[4:0] = ((id_instr[6:0] != 7'b011_0111) | (id_instr[6:0] != 7'b001_0111) | (id_instr[6:0] != 7'b110_1111))
+  assign if_id_rs[4:0] = ((id_instr[6:0] != 7'b011_0111) & (id_instr[6:0] != 7'b001_0111) & (id_instr[6:0] != 7'b110_1111))
                           ? id_instr[19:15] : 5'd0;
-  assign id_ex_rs[4:0] = ((ex_instr[6:0] != 7'b011_0111) | (ex_instr[6:0] != 7'b001_0111) | (ex_instr[6:0] != 7'b110_1111))
+  assign id_ex_rs[4:0] = ((ex_instr[6:0] != 7'b011_0111) & (ex_instr[6:0] != 7'b001_0111) & (ex_instr[6:0] != 7'b110_1111))
                           ? ex_instr[19:15] : 5'd0;
-  assign ex_mem_rs[4:0] = ((mem_instr[6:0] != 7'b011_0111) | (mem_instr[6:0] != 7'b001_0111) | (mem_instr[6:0] != 7'b110_1111))
+  assign ex_mem_rs[4:0] = ((mem_instr[6:0] != 7'b011_0111) & (mem_instr[6:0] != 7'b001_0111) & (mem_instr[6:0] != 7'b110_1111))
                           ? mem_instr[19:15] : 5'd0;
 
   // rs2
-  assign if_id_rs[9:5] = ((id_instr[6:0] != 7'b011_0111) | (id_instr[6:0] != 7'b001_0111) | (id_instr[6:0] != 7'b110_1111) | (id_instr[6:0] != 7'b001_0011))
+  assign if_id_rs[9:5] = ((id_instr[6:0] != 7'b011_0111) & (id_instr[6:0] != 7'b001_0111) & (id_instr[6:0] != 7'b110_1111) & (id_instr[6:0] != 7'b001_0011))
                           ? id_instr[24:20] : 5'd0;
-  assign id_ex_rs[9:5] = ((ex_instr[6:0] != 7'b011_0111) | (ex_instr[6:0] != 7'b001_0111) | (ex_instr[6:0] != 7'b110_1111) | (ex_instr[6:0] != 7'b001_0011))
+  assign id_ex_rs[9:5] = ((ex_instr[6:0] != 7'b011_0111) & (ex_instr[6:0] != 7'b001_0111) & (ex_instr[6:0] != 7'b110_1111) & (ex_instr[6:0] != 7'b001_0011))
                           ? ex_instr[24:20] : 5'd0;
-  assign ex_mem_rs[9:5] = ((mem_instr[6:0] != 7'b011_0111) | (mem_instr[6:0] != 7'b001_0111) | (mem_instr[6:0] != 7'b110_1111) | (mem_instr[6:0] != 7'b001_0011))
+  assign ex_mem_rs[9:5] = ((mem_instr[6:0] != 7'b011_0111) & (mem_instr[6:0] != 7'b001_0111) & (mem_instr[6:0] != 7'b110_1111) & (mem_instr[6:0] != 7'b001_0011))
                           ? mem_instr[24:20] : 5'd0;
   
   forwarding_unit forwarding_unit (
@@ -238,10 +240,12 @@ module hart #(
     .mem_wb_reg_write(wb_reg_write_en),
 
 
-    .id_forward_data(id_forward_data),
+    .id_forward_data_rs1(id_forward_data_rs1),
+    .id_forward_data_rs2(id_forward_data_rs2),
     .id_forward_sel(id_forward_sel),
 
-    .ex_forward_data(ex_forward_data),
+    .ex_forward_data_rs1(ex_forward_data_rs1),
+    .ex_forward_data_rs2(ex_forward_data_rs2),
     .ex_forward_sel(ex_forward_sel),
 
     .mem_forward_data(mem_forward_data),
@@ -348,7 +352,8 @@ module hart #(
     .i_instr(id_instr),
     .i_pc(id_pc),
     
-    .id_forward_data(id_forward_data), 
+    .id_forward_data_rs1(id_forward_data_rs1),
+    .id_forward_data_rs2(id_forward_data_rs2),
     .id_forward_sel(id_forward_sel),  
 
     .id_ex_rd(ex_rd),
@@ -489,8 +494,8 @@ module hart #(
   
   wire [31:0] ex_alu_result;
   
-  wire [31:0] ex_rs1_with_forwarding = ex_forward_sel[0] == 1'b1 ? ex_forward_data : ex_rs1_data;
-  wire [31:0] ex_rs2_with_forwarding = ex_forward_sel[1] == 1'b1 ? ex_forward_data : ex_rs2_data;
+  wire [31:0] ex_rs1_with_forwarding = ex_forward_sel[0] == 1'b1 ? ex_forward_data_rs1 : ex_rs1_data;
+  wire [31:0] ex_rs2_with_forwarding = ex_forward_sel[1] == 1'b1 ? ex_forward_data_rs2 : ex_rs2_data;
   
   execute execute (
     .pc(ex_pc),
@@ -546,7 +551,7 @@ module hart #(
 
     .ex_flush(ex_flush),
 
-    .i_rs1_data(ex_rs1_data),
+    .i_rs1_data(ex_rs1_with_forwarding),
     .i_rs2_data(ex_rs2_data),
 
     .i_alu_result(ex_alu_result),

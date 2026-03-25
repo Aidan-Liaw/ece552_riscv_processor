@@ -9,7 +9,8 @@ module decode (
   input  wire [31:0] i_instr,
   input  wire [31:0] i_pc,
   
-  input  wire [31:0] id_forward_data,
+  input  wire [31:0] id_forward_data_rs1,
+  input  wire [31:0] id_forward_data_rs2,
   input  wire [ 1:0] id_forward_sel,
 
   input  wire [ 4:0] id_ex_rd,
@@ -123,13 +124,14 @@ module decode (
   ///// branch and next pc logic /////
   wire is_branch_taken;
   //slight fix 
-  wire [31:0] register_jump_base_address = id_forward_sel[0] == 1'b1 ? id_forward_data : rs1_data;
+  wire [31:0] register_jump_base_address = id_forward_sel[0] ? id_forward_data_rs1 : rs1_data;
   wire [31:0] register_jump_target  = (register_jump_base_address + imm_val) & 32'hFFFFFFFE; // Clears LSBit
   wire [31:0] immediate_jump_target = i_pc + imm_val;
 	
 	// TODO:
-	wire [31:0] rs1_branch = id_forward_sel[0] == 1'b1 ? id_forward_data : rs1_data;
-  wire [31:0] rs2_branch = id_forward_sel[1] == 1'b1 ? id_forward_data : rs2_data;
+	wire [31:0] rs1_branch = id_forward_sel[0] ? id_forward_data_rs1 : rs1_data;
+
+    wire [31:0] rs2_branch = id_forward_sel[1] ? id_forward_data_rs2 : rs2_data;
 	branch_condition_checker branch_condition_checker(i_rst, branch, funct3, rs1_branch, rs2_branch, is_branch_taken);
 	
   // only trigger a jump if the branch is taken and the pipeline is not stalled
@@ -152,6 +154,7 @@ module decode (
     .id_ex_reg_write(id_ex_reg_write),
     .ex_mem_mem_read(ex_mem_mem_read),
     .ex_mem_rd(ex_mem_rd),
+    .ex_mem_reg_write(ex_mem_reg_write), 
     .if_id_write_en(if_id_write_en),
     .pc_write_en(pc_write_en),
     .cu_passthrough_en(cu_passthrough_en)

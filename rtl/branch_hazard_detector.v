@@ -9,10 +9,11 @@ module branch_hazard_detector(
     input wire id_ex_reg_write,
     input wire ex_mem_mem_read,
     input wire [4:0] ex_mem_rd,
+    input wire ex_mem_reg_write,
     
-    output reg        if_id_write_en,
-    output reg        pc_write_en,
-    output reg        cu_passthrough_en
+    output wire        if_id_write_en,
+    output wire        pc_write_en,
+    output wire        cu_passthrough_en
 );
     wire [4:0] rs1 = instr[19:15];
     wire [4:0] rs2 = instr[24:20]; 
@@ -48,23 +49,31 @@ module branch_hazard_detector(
     assign alu_hazard = (is_branch | is_jalr) &
         id_ex_reg_write & !id_ex_mem_read & (id_ex_rd != 0) &
         (((id_ex_rd == rs1) & rs1_rd) | ((id_ex_rd == rs2) & rs2_rd));
+
+    assign ex_mem_alu_hazard = (is_branch | is_jalr) &
+        ex_mem_reg_write & !ex_mem_mem_read & (ex_mem_rd != 0) &
+        (((ex_mem_rd == rs1) & rs1_rd) | ((ex_mem_rd == rs2) & rs2_rd));
     
     wire hazard;
-    assign hazard = load_use_hazard | load_mem_hazard | alu_hazard;
+    assign hazard = load_use_hazard | load_mem_hazard | alu_hazard | ex_mem_alu_hazard;
 
-    always @(*) begin
-        case (hazard | i_rst) 
-            1'b1: begin
-                pc_write_en = 0;
-                if_id_write_en = 0;
-                cu_passthrough_en = 0;
-            end
-            default: begin
-                pc_write_en = 1;
-                if_id_write_en = 1;
-                cu_passthrough_en = 1;
-            end
-        endcase
-    end
+    // always @(*) begin
+    //     case (hazard | i_rst) 
+    //         1'b1: begin
+    //             pc_write_en = 0;
+    //             if_id_write_en = 0;
+    //             cu_passthrough_en = 0;
+    //         end
+    //         default: begin
+    //             pc_write_en = 1;
+    //             if_id_write_en = 1;
+    //             cu_passthrough_en = 1;
+    //         end
+    //     endcase
+    // end
+    assign pc_write_en = ~(hazard | i_rst);
+    assign if_id_write_en = ~(hazard | i_rst);
+    assign cu_passthrough_en = ~(hazard | i_rst);
+    
 
 endmodule
