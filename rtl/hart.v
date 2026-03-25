@@ -275,6 +275,7 @@ module hart #(
   wire        if_id_write_en;
   wire [31:0] if_id_instr = i_imem_rdata;
 
+  wire id_valid; // 3/25 UPDATE
   
   if_id_registers #(
     .NOP_INSTRUCTION(32'h00000013)
@@ -286,9 +287,11 @@ module hart #(
     
     .i_instr(if_id_instr),
     .i_pc(if_pc),
+    .i_valid(1'b1),  // 3/25 UPDATE: fetch always pulls a valid instruction
 
     .o_instr(id_instr),
-    .o_pc(id_pc)
+    .o_pc(id_pc),
+    .o_valid(id_valid)  // 3/25 UPDATE: out to decode 
   );
   
   // id_instr, id_pc, id_ex_next_pc, are all defined earlier
@@ -439,7 +442,7 @@ module hart #(
     .i_clk(i_clk),
     .i_rst(i_rst),
 
-    .i_is_retiring(cu_passthrough_en),
+    .i_is_retiring(cu_passthrough_en & id_valid),  // 3/25 UPDATE: added '& id_valid'
     
     .i_instr(id_instr),
     .i_pc(id_pc),

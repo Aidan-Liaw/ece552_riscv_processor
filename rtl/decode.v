@@ -135,8 +135,8 @@ module decode (
 	branch_condition_checker branch_condition_checker(i_rst, branch, funct3, rs1_branch, rs2_branch, is_branch_taken);
 	
   // only trigger a jump if the branch is taken and the pipeline is not stalled
-  assign o_is_jump = jump & cu_passthrough_en;
-  assign o_is_branch = branch & is_branch_taken & cu_passthrough_en;
+  assign o_is_jump = jump;  // 3/25 UPDATE: removed '& cu_passthrough_en;'
+  assign o_is_branch = branch;  // 3/25 UPDATE: removed '& is_branch_taken & cu_passthrough_en;'
   assign o_is_jump_or_branch = ((branch & is_branch_taken) | jump) & cu_passthrough_en;
 
   // safely combine the cu flush with our jump flush

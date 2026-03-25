@@ -87,7 +87,7 @@ module forwarding_unit(
       id_forward_sel[0] <= (is_jump | is_branch) 
                             & (if_id_rs[4:0] != 5'd0)
                             & ((if_id_rs[4:0] == ex_mem_rd) | (if_id_rs[4:0] == mem_wb_rd));
-      id_forward_sel[1] <= is_jump 
+      id_forward_sel[1] <= (is_jump | is_branch)  // 3/25 UPDATE: added '| is_branch'
                             & (if_id_rs[9:5] != 5'd0)
                             & ((if_id_rs[9:5] == ex_mem_rd) | (if_id_rs[9:5] == mem_wb_rd));       
       

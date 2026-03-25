@@ -135,7 +135,8 @@ module id_ex_registers #(
       
       //basicially in our trace we were always retiring a nop at first
       //o_is_retiring <= (i_instr != 32'h00000013);
-      o_is_retiring <= i_is_retiring & (i_instr != 32'h00000013);
+      //o_is_retiring <= i_is_retiring & (i_instr != 32'h00000013);
+      o_is_retiring <= i_is_retiring;  // 3/25 UPDATE
     end
   end
 

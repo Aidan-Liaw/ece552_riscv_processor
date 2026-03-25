@@ -31,33 +31,41 @@ module if_id_registers #(
   
   input  wire [31:0] i_instr,
   input  wire [31:0] i_pc,
+  input wire         i_valid,  // 3/25 UPDATE
   
   output wire [31:0] o_instr,
-  output wire [31:0] o_pc
+  output wire [31:0] o_pc,
+  output wire        o_valid  // 3/25 UPDATE
 );
   
   reg [31:0] instr = NOP_INSTRUCTION;
   reg [31:0] pc = RESET_ADDR;
+  reg        valid = 1'b0;  // 3/25 UPDATE: to track validity 
   
   assign o_instr = instr;
   assign o_pc = pc;
+  assign o_valid = valid;  // 3/25 UPDATE
 
   always @(posedge i_clk) begin
     casez ({halt, if_flush, write_en})
       3'b1?? : begin
         instr <= NOP_INSTRUCTION;
+        valid <= 1'b0;  // 3/25 UPDATE
       end
       3'b01? : begin
         instr <= NOP_INSTRUCTION;
         pc <= i_pc;
+        valid <= 1'b0;  // 3/25 UPDATE: flushed instruction becomes invalid
       end
       3'b001 : begin
         instr <= i_instr;
         pc <= i_pc;
+        valid <= i_valid;  // 3/25 UPDATE: pass validity through
       end
       default : begin
         instr <= instr;
         pc <= pc;
+        valid <= valid;
       end
     endcase
 	end

@@ -55,7 +55,7 @@ module branch_hazard_detector(
         (((ex_mem_rd == rs1) & rs1_rd) | ((ex_mem_rd == rs2) & rs2_rd));
     
     wire hazard;
-    assign hazard = load_use_hazard | load_mem_hazard | alu_hazard | ex_mem_alu_hazard;
+    assign hazard = load_use_hazard | load_mem_hazard | alu_hazard;  // 3/25 UPDATE: removed '| ex_mem_alu_hazard;'
 
     // always @(*) begin
     //     case (hazard | i_rst) 
