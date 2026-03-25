@@ -215,7 +215,9 @@ module hart #(
                           ? ex_instr[24:20] : 5'd0;
   assign ex_mem_rs[9:5] = ((mem_instr[6:0] != 7'b011_0111) & (mem_instr[6:0] != 7'b001_0111) & (mem_instr[6:0] != 7'b110_1111) & (mem_instr[6:0] != 7'b001_0011))
                           ? mem_instr[24:20] : 5'd0;
-  
+
+  wire [31:0] writeback_data;
+
   forwarding_unit forwarding_unit (
     .if_id_rs(if_id_rs),
     .is_jump(is_jump),
@@ -236,7 +238,7 @@ module hart #(
     .mem_wb_instr(wb_instr),
     .mem_wb_pc(wb_pc),
     .mem_wb_rd(wb_rd),
-    .mem_wb_data(wb_dmem_data),
+    .mem_wb_data(writeback_data),
     .mem_wb_reg_write(wb_reg_write_en),
 
 
@@ -343,7 +345,6 @@ module hart #(
   wire        wb_halt;
   // wb_reg_write_en and wb_rd are defined earlier
                      
-  wire [31:0] writeback_data;
 
   decode decode (
     .i_clk(i_clk),
@@ -552,7 +553,7 @@ module hart #(
     .ex_flush(ex_flush),
 
     .i_rs1_data(ex_rs1_with_forwarding),
-    .i_rs2_data(ex_rs2_data),
+    .i_rs2_data(ex_rs2_with_forwarding),
 
     .i_alu_result(ex_alu_result),
 
