@@ -9,6 +9,12 @@ module decode (
   input  wire [31:0] i_instr,
   input  wire [31:0] i_pc,
   
+  input  wire        i_imem_ready,
+  input  wire        i_dmem_ready,
+  
+  input  wire        instr_buffer_empty,
+  input  wire        instr_buffer_full,
+  
   input  wire [31:0] id_forward_data_rs1,
   input  wire [31:0] id_forward_data_rs2,
   input  wire [ 1:0] id_forward_sel,
@@ -58,6 +64,7 @@ module decode (
   output wire        mem_flush,
   
   output wire        halt_generate,
+  output wire        dmem_stall,  
   output wire        trap_control_unit
 );
 
@@ -142,8 +149,14 @@ module decode (
   // safely combine the cu flush with our jump flush
   assign if_flush = cu_if_flush | o_is_jump_or_branch;
 
-	next_pc_setter next_pc_setter(i_pc, opcode, is_branch_taken, jump, 
-	 register_jump_target, immediate_jump_target, o_next_pc);
+	next_pc_setter next_pc_setter(i_pc, i_imem_ready, i_dmem_ready, instr_buffer_empty, instr_buffer_full, 
+	  opcode, is_branch_taken, jump, register_jump_target, immediate_jump_target, o_next_pc);
+	 
+	wire if_id_is_hazard_free;
+	assign if_id_write_en = i_imem_ready | if_id_is_hazard_free;
+	
+	// Stall if the D-Mem is not ready to accept a request, and the instruction at the MEM stage must read from D-Mem
+	assign dmem_stall = (~i_dmem_ready) & ex_mem_mem_read;
 
 	branch_hazard_detector branch_hazard_detector(
 	  .i_rst(i_rst),
@@ -155,7 +168,7 @@ module decode (
     .ex_mem_mem_read(ex_mem_mem_read),
     .ex_mem_rd(ex_mem_rd),
     .ex_mem_reg_write(ex_mem_reg_write), 
-    .if_id_write_en(if_id_write_en),
+    .if_id_write_en(if_id_is_hazard_free),
     .pc_write_en(pc_write_en),
     .cu_passthrough_en(cu_passthrough_en)
   );

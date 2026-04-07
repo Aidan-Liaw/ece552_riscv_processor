@@ -13,23 +13,45 @@ module hart #(
     input  wire        i_rst,
     // Instruction fetch goes through a read only instruction memory (imem)
     // port. The port accepts a 32-bit address (e.g. from the program counter)
-    // per cycle and combinationally returns a 32-bit instruction word. This
-    // is not representative of a realistic memory interface; it has been
-    // modeled as more similar to a DFF or SRAM to simplify phase 3. In
-    // later phases, you will replace this with a more realistic memory.
+    // per cycle and sequentially returns a 32-bit instruction word. For
+    // projects 6 and 7, this memory has been updated to be more realistic
+    // - reads are no longer combinational, and both read and write accesses
+    // take multiple cycles to complete.
     //
+    // The testbench memory models a fixed, multi cycle memory with partial
+    // pipelining. The memory will accept a new request every N cycles by
+    // asserting `mem_ready`, and if a request is made, the memory perform
+    // the request (read or write) after M cycles, asserting mem_valid to
+    // indicate the read data is ready (or the write is complete). Requests
+    // are completed in order. The values of N and M are deterministic, but
+    // may change between test cases - you must design your CPU to work
+    // correctly by looking at `mem_ready` and `mem_valid` rather than
+    // hardcoding a latency assumption.
+    //
+    // Indicates that the memory is ready to accept a new read request.
+    input  wire        i_imem_ready,
     // 32-bit read address for the instruction memory. This is expected to be
     // 4 byte aligned - that is, the two LSBs should be zero.
     output wire [31:0] o_imem_raddr,
-    // Instruction word fetched from memory, available on the same cycle.
+    // Issue a read request to the memory on this cycle. This should not be
+    // asserted if `i_imem_ready` is not asserted.
+    output wire        o_imem_ren,
+    // Indicates that a valid instruction word is being returned from memory.
+    input  wire        i_imem_valid,
+    // Instruction word fetched from memory, available sequentially some
+    // M cycles after a request (imem_ren) is issued.
     input  wire [31:0] i_imem_rdata,
+    
     // Data memory accesses go through a separate read/write data memory (dmem)
     // that is shared between read (load) and write (stored). The port accepts
     // a 32-bit address, read or write enable, and mask (explained below) each
-    // cycle. Reads are combinational - values are available immediately after
-    // updating the address and asserting read enable. Writes occur on (and
-    // are visible at) the next clock edge.
+    // cycle.
     //
+    // The timing of the dmem interface is the same as the imem interface. See
+    // the documentation above.
+    //
+    // Indicates that the memory is ready to accept a new read or write request.
+    input  wire        i_dmem_ready,
     // Read/write address for the data memory. This should be 32-bit aligned
     // (i.e. the two LSB should be zero). See `o_dmem_mask` for how to perform
     // half-word and byte accesses at unaligned addresses.
@@ -42,8 +64,8 @@ module hart #(
     // When asserted, the memory will perform a write to the aligned address
     // `o_dmem_addr`. When asserted, the memory will write the bytes in
     // `o_dmem_wdata` (specified by the mask) to memory at the specified
-    // address on the next rising clock edge. It is illegal to assert this and
-    // `o_dmem_ren` on the same cycle.
+    // address. It is illegal to assert this and `o_dmem_ren` on the same
+    // cycle.
     output wire        o_dmem_wen,
     // The 32-bit word to write to memory when `o_dmem_wen` is asserted. When
     // write enable is asserted, the byte lanes specified by the mask will be
@@ -71,6 +93,8 @@ module hart #(
     // the value of the `sb` instruction left by 24 bits to place it in the
     // appropriate byte lane.
     output wire [ 3:0] o_dmem_mask,
+    // Indicates that a valid data word is being returned from memory.
+    input  wire        i_dmem_valid,
     // The 32-bit word read from data memory. When `o_dmem_ren` is asserted,
     // this will immediately reflect the contents of memory at the specified
     // address, for the bytes enabled by the mask. When read enable is not
@@ -146,8 +170,7 @@ module hart #(
 	
 	wire [31:0] if_pc;
 	wire [31:0] if_pc_plus_4;
-	wire        if_halt; // ?
-	
+  	
   wire        pc_write_en;
   wire        is_jump;
   wire        is_branch;
@@ -253,7 +276,7 @@ module hart #(
     .mem_forward_data(mem_forward_data),
     .mem_forward_sel(mem_forward_sel)
   );
-	
+  	
 	fetch  #(
     .RESET_ADDR(32'h00000000)
   ) fetch (
@@ -264,18 +287,25 @@ module hart #(
     .target_pc(id_ex_next_pc),
     .is_jump_or_branch(is_jump_or_branch),
     .pc_write_en(pc_write_en),
+    .i_imem_ready(i_imem_ready),
     
     .pc(if_pc),
-    .pc_plus_4(if_pc_plus_4)
+    .pc_plus_4(if_pc_plus_4),
+    .o_imem_ren(o_imem_ren)
   );
 
 	assign o_imem_raddr = if_pc;
+	
+	wire dmem_stall;
 	
 	wire        if_flush;
   wire        if_id_write_en;
   wire [31:0] if_id_instr = i_imem_rdata;
 
   wire id_valid; // 3/25 UPDATE
+  wire if_id_buffer_full;
+  wire if_id_buffer_empty;
+  
   
   if_id_registers #(
     .NOP_INSTRUCTION(32'h00000013)
@@ -287,11 +317,13 @@ module hart #(
     
     .i_instr(if_id_instr),
     .i_pc(if_pc),
-    .i_valid(1'b1),  // 3/25 UPDATE: fetch always pulls a valid instruction
+    .i_imem_valid(i_imem_valid),
 
     .o_instr(id_instr),
     .o_pc(id_pc),
-    .o_valid(id_valid)  // 3/25 UPDATE: out to decode 
+    .o_valid(id_valid),  // 3/25 UPDATE: out to decode
+    .o_buffer_empty(if_id_buffer_empty),
+    .o_buffer_full(if_id_buffer_full)
   );
   
   // id_instr, id_pc, id_ex_next_pc, are all defined earlier
@@ -356,6 +388,11 @@ module hart #(
     .i_instr(id_instr),
     .i_pc(id_pc),
     
+    .i_imem_ready(i_imem_ready),
+    .i_dmem_ready(i_dmem_ready),
+    .instr_buffer_empty(if_id_buffer_empty),
+    .instr_buffer_full(if_id_buffer_full),
+    
     .id_forward_data_rs1(id_forward_data_rs1),
     .id_forward_data_rs2(id_forward_data_rs2),
     .id_forward_sel(id_forward_sel),  
@@ -407,9 +444,10 @@ module hart #(
     .if_flush(if_flush),
     .id_flush(id_flush),
     .ex_flush(ex_flush),
-    .mem_flush(mem_flush),
+    .mem_flush(mem_flush), 
 
     .halt_generate(halt),
+    .dmem_stall(dmem_stall),
     .trap_control_unit(trap_control_unit)
   );
   
@@ -451,6 +489,7 @@ module hart #(
     .id_flush(id_flush),
     .cu_passthrough_en(cu_passthrough_en),
     .i_is_halting(halt),
+    .i_is_stalling(dmem_stall),
 
     
     .i_rs1_data(id_rs1_data),
@@ -552,6 +591,8 @@ module hart #(
     .i_next_pc(ex_next_pc),
     
     .i_is_halting(ex_is_halting),
+    .i_is_stalling(dmem_stall),
+
 
     .ex_flush(ex_flush),
 
@@ -601,12 +642,14 @@ module hart #(
   
   wire [31:0] mem_rs2_with_forwarding = mem_forward_sel == 1'b1 ? mem_forward_data : mem_rs2_data;
   
-  memory memory (
+  memory_stage memory_stage (
     .funct3(mem_funct3),
     .rs2_data(mem_rs2_with_forwarding),
     .alu_result(mem_alu_result),
     .i_dmem_read_en(mem_dmem_read_en),
     .i_dmem_write_en(mem_dmem_write_en),
+  
+    .i_dmem_ready(i_dmem_ready),
     .i_dmem_rdata(mem_dmem_rdata),
     
     .o_dmem_addr(o_dmem_addr),
@@ -659,7 +702,10 @@ module hart #(
     .i_next_pc(mem_next_pc),
 
     .mem_flush(mem_flush),
+
     .i_is_halting(mem_is_halting),
+    .i_is_stalling(dmem_stall),
+
 
     .i_rs1_data(mem_rs1_data),
     .i_rs2_data(mem_rs2_data),

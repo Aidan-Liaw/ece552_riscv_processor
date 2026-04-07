@@ -37,6 +37,8 @@ module control_unit (
   output reg       mem_flush,
 
   // Global Signals
+//  output reg       imem_stall_generate,                 // Halt due to awaiting I-mem
+//  output reg       dmem_stal_generate,                 // Halt due to awaiting D-mem
   output reg       halt_generate,               // 1 = EBREAK, stop processor. For ebreak only.
   output reg       trap
 );

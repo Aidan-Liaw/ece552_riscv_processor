@@ -33,6 +33,7 @@ module ex_mem_registers #(
   
   input  wire        ex_flush,
   input  wire        i_is_halting,
+  input  wire        i_is_stalling,
 
   input  wire [31:0] i_rs1_data,
   input  wire [31:0] i_rs2_data,
@@ -102,6 +103,25 @@ module ex_mem_registers #(
       o_register_write_sel <= 2'd0;
       
       o_is_retiring <= 1'b0;
+    end else if (i_is_stalling) begin
+      o_instr <= o_instr;
+      o_pc <= o_pc;
+      o_next_pc <= o_next_pc;
+      
+      o_rs1_data <= o_rs1_data;
+      o_rs2_data <= o_rs2_data;
+      
+      o_alu_result <= o_alu_result;
+
+      o_dmem_read_en <= o_dmem_read_en;
+      o_dmem_write_en <= o_dmem_write_en;
+      o_funct3 <= o_funct3;
+
+      o_imm_val <= o_imm_val;
+      o_reg_write_en <= o_reg_write_en;
+      o_register_write_sel <= o_register_write_sel;
+      
+      o_is_retiring <= o_is_retiring;
     end else begin
       o_instr <= i_instr;
       o_pc <= i_pc;

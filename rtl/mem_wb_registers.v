@@ -33,6 +33,7 @@ module mem_wb_registers #(
   
   input  wire        mem_flush,
   input  wire        i_is_halting,
+  input  wire        i_is_stalling,
 
   input  wire [31:0] i_rs1_data,
   input  wire [31:0] i_rs2_data,
@@ -114,6 +115,30 @@ module mem_wb_registers #(
       o_register_write_sel <= 2'd0;
       
       o_is_retiring <= 1'b0;
+    end else if (i_is_stalling) begin
+      o_instr <= o_instr;
+      o_pc <= o_pc;
+      o_next_pc <= o_next_pc;
+      
+      o_rs1_data <= o_rs1_data;
+      o_rs2_data <= o_rs2_data;
+      
+      o_retire_dmem_addr <= o_retire_dmem_addr;
+      o_retire_dmem_ren <= o_retire_dmem_ren;
+      o_retire_dmem_wen <= o_retire_dmem_wen;
+      o_retire_dmem_mask <= o_retire_dmem_mask;
+      o_retire_dmem_wdata <= o_retire_dmem_wdata;
+      o_retire_dmem_rdata <= o_retire_dmem_rdata;
+      
+      o_alu_result <= o_alu_result;
+      o_imm_val <= o_imm_val;
+      o_dmem_data <= o_dmem_data;
+      o_reg_write_en <= o_reg_write_en; // You might wanna check this...
+      o_register_write_sel <= o_register_write_sel;
+      
+      // This line may be problematic, as cycle delays due to memory access
+      // mean that this line should be low
+      o_is_retiring <= o_is_retiring;
     end else begin
       o_instr <= i_instr;
       o_pc <= i_pc;

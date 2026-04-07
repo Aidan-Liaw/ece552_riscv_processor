@@ -2,12 +2,15 @@
 
 `default_nettype wire
 
-module memory (
+// Stupid rename due to conflict with TA's module names
+module memory_stage (
   input  wire [ 2:0] funct3,
   input  wire [31:0] rs2_data,
   input  wire [31:0] alu_result,
   input  wire        i_dmem_read_en,
   input  wire        i_dmem_write_en,
+  
+  input  wire        i_dmem_ready,
   input  wire [31:0] i_dmem_rdata,
 
   output wire [31:0] o_dmem_addr,
@@ -30,8 +33,11 @@ module memory (
 	// In a real RV32-I, only the LSBit is 0'ed, but since we are no factoring in 
 	// the C or Zc* extenstions, this is fine
 	assign o_dmem_addr = {alu_result[31:2], 2'b00};
-	assign o_dmem_ren = i_dmem_read_en;
-	assign o_dmem_wen = i_dmem_write_en;
+	
+	// The write and read enables cannot assert unless the D-Mem 
+	// is ready to accept a new request
+	assign o_dmem_ren = i_dmem_read_en & i_dmem_ready;
+	assign o_dmem_wen = i_dmem_write_en & i_dmem_ready;
 	assign o_dmem_wdata = dmem_wdata;
   assign o_dmem_mask = i_dmem_write_en == 1 ? write_dmem_mask : read_dmem_mask;
 
