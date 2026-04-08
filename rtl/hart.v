@@ -311,9 +311,12 @@ module hart #(
     .NOP_INSTRUCTION(32'h00000013)
   ) if_id_registers (
     .i_clk(i_clk),
+    .i_rst(i_rst),
     .halt(halt),
     .if_flush(if_flush),
     .write_en(if_id_write_en),
+    .i_imem_ready(i_imem_ready),
+    .i_imem_ren(o_imem_ren),
     
     .i_instr(if_id_instr),
     .i_pc(if_pc),
@@ -387,6 +390,7 @@ module hart #(
     
     .i_instr(id_instr),
     .i_pc(id_pc),
+    .i_valid(id_valid),
     
     .i_imem_ready(i_imem_ready),
     .i_dmem_ready(i_dmem_ready),

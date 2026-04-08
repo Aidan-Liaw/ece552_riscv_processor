@@ -10,6 +10,7 @@ module control_unit (
   input wire [4:0] rs2,
   
   input wire       keep_halting,
+  input wire i_valid,
   
   // IF Signals
   output reg       branch,             // 1 = branch instruction. For branches only.
@@ -100,9 +101,10 @@ module control_unit (
       end
       2'b00: begin
 //      1'b0, 1'bx: begin
-        case (opcode)
+        //instructions not always valid now 
+        casez ({i_valid, opcode})
           // r-type arithmetic
-          7'b011_0011: begin
+          8'b1_011_0011: begin
             reg_write_en = 1'b1;
             imm_format = 6'b000001; 
             write_reg_sel = 2'b00; 
@@ -113,7 +115,7 @@ module control_unit (
           end
     
           // i-type arithmetic
-          7'b001_0011: begin
+          8'b1_001_0011: begin
             reg_write_en = 1'b1;
             alu_src = 1'b1;
             imm_format = 6'b000010;
@@ -124,14 +126,14 @@ module control_unit (
           end
           
           // lui
-          7'b011_0111: begin
+          8'b1_011_0111: begin
             reg_write_en = 1'b1;
             imm_format = 6'b010000;
             write_reg_sel = 2'b10;
           end
     
           // auipc
-          7'b001_0111: begin
+          8'b1_001_0111: begin
             reg_write_en = 1'b1;
             imm_format = 6'b010000; 
             pc_add = 1'b1;
@@ -140,7 +142,7 @@ module control_unit (
           end
     
           // load instruction 
-          7'b000_0011: begin
+          8'b1_000_0011: begin
             imm_format = 6'b000010;
             reg_write_en = 1'b1;
             mem_read_en = 1'b1;
@@ -149,20 +151,20 @@ module control_unit (
           end
     
           // store instruction
-          7'b010_0011: begin
+          8'b1_010_0011: begin
             imm_format = 6'b000100;
             mem_write_en = 1'b1;
             alu_src = 1'b1;
           end
     
           // branch
-          7'b110_0011: begin
+          8'b1_110_0011: begin
             imm_format = 6'b001000;
             branch = 1'b1;
           end
     
           // jal
-          7'b110_1111: begin
+          8'b1_110_1111: begin
             reg_write_en = 1'b1;
             imm_format = 6'b100000;
             jump = 1'b1;
@@ -171,7 +173,7 @@ module control_unit (
           end
     
           // jalr
-          7'b110_0111: begin
+          8'b1_110_0111: begin
             reg_write_en = 1'b1;
             imm_format = 6'b000010;
             jump = 1'b1;
@@ -186,14 +188,18 @@ module control_unit (
           // If you check against RV32I, you will quickly see that 
           // imm[11:0] must be checked to be 11'b000000000001
           // which differs from the WISC-F25 standard that sets this imm[11:0] to all 0's
-          7'b111_0011: begin
+          8'b1_111_0011: begin
             halt_generate = 1'b1;
             if_flush = 1'b1;
+          end
+
+          8'b0_???????: begin
+            //not valid instruction
           end
           
           default: begin
             halt_generate = 1'b1; // You should probably trap as well.
-            trap = 1'b0;
+            trap = 1'b1;
             if_flush = 1'b1;
             id_flush = 1'b1;
             ex_flush = 1'b1;

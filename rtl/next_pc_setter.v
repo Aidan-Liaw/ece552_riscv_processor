@@ -58,9 +58,10 @@ module next_pc_setter(
 	// If I-Mem or D-Mem are not ready, then PC cannot increment
 	// This is because if I-Mem is not ready and we modify PC, then an address may have been skipped
 	// and if D-Mem is not ready then the whole processor must stall, including the PC
-	assign next_pc = instr_buffer_full | (~i_imem_ready) | (~i_dmem_ready)
-	                   ? i_pc
-	                   : (is_jump_taken | is_branch_taken)
-	                       ? jump_target
+    //redirect pc first if control flow change then stall
+	assign next_pc = (is_jump_taken | is_branch_taken)
+	                   ? jump_target
+	                   : (instr_buffer_full | (~i_imem_ready))
+	                       ? i_pc
 	                       : (i_pc + 4);
 endmodule

@@ -8,6 +8,7 @@ module decode (
   
   input  wire [31:0] i_instr,
   input  wire [31:0] i_pc,
+  input  wire        i_valid,
   
   input  wire        i_imem_ready,
   input  wire        i_dmem_ready,
@@ -97,6 +98,7 @@ module decode (
     .funct7(funct7),
     .rs2(rs2),
     .keep_halting(keep_halting),
+    .i_valid(i_valid),
     
     // IF Signals
     .branch(branch),
