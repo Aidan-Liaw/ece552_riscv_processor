@@ -9,6 +9,7 @@ module memory_stage (
   input  wire [31:0] alu_result,
   input  wire        i_dmem_read_en,
   input  wire        i_dmem_write_en,
+  input  wire        i_dmem_issue_en,
   
   input  wire        i_dmem_ready,
   input  wire [31:0] i_dmem_rdata,
@@ -36,8 +37,8 @@ module memory_stage (
 	
 	// The write and read enables cannot assert unless the D-Mem 
 	// is ready to accept a new request
-	assign o_dmem_ren = i_dmem_read_en & i_dmem_ready;
-	assign o_dmem_wen = i_dmem_write_en & i_dmem_ready;
+	assign o_dmem_ren = i_dmem_read_en & i_dmem_issue_en & i_dmem_ready;
+	assign o_dmem_wen = i_dmem_write_en & i_dmem_issue_en & i_dmem_ready;
 	assign o_dmem_wdata = dmem_wdata;
   assign o_dmem_mask = i_dmem_write_en == 1 ? write_dmem_mask : read_dmem_mask;
 

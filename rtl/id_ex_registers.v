@@ -89,10 +89,9 @@ module id_ex_registers #(
   end
   
   always @(posedge i_clk) begin
-    keep_halting <= i_rst == 1'b1 ? 0 : i_is_halting;
-    o_is_halting <= i_rst == 1'b1 ? 0 : i_is_halting;
-
-    if (id_flush | (~cu_passthrough_en & ~i_rst) | i_rst) begin
+    if (id_flush | ((~cu_passthrough_en & ~i_rst) & ~i_is_stalling) | i_rst) begin
+      keep_halting <= 1'b0;
+      o_is_halting <= 1'b0;
       o_instr <= NOP_INSTRUCTION;
       o_pc <= i_rst == 1'b1 ? RESET_ADDR : o_pc;
       o_next_pc <= i_rst == 1'b1 ? RESET_ADDR + 4: o_next_pc;
@@ -115,6 +114,7 @@ module id_ex_registers #(
       o_is_retiring <= 1'b0;
 
     end else if (i_is_stalling) begin
+      o_is_halting <= o_is_halting;
       o_instr <= o_instr;
       o_pc <= o_pc;
       o_next_pc <= o_next_pc;
@@ -136,6 +136,8 @@ module id_ex_registers #(
       
       o_is_retiring <= o_is_retiring;
     end else begin
+      keep_halting <= i_is_halting;
+      o_is_halting <= i_is_halting;
       o_instr <= i_instr;
       o_pc <= i_pc;
       o_next_pc <= i_next_pc;

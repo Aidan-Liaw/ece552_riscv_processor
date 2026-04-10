@@ -276,13 +276,14 @@ module hart #(
     .mem_forward_data(mem_forward_data),
     .mem_forward_sel(mem_forward_sel)
   );
-  	
-	fetch  #(
+
+  wire        keep_halting;
+  fetch  #(
     .RESET_ADDR(32'h00000000)
   ) fetch (
     .i_clk(i_clk),
     .i_rst(i_rst),
-    .halt(halt),
+    .halt(keep_halting),
     
     .target_pc(id_ex_next_pc),
     .is_jump_or_branch(is_jump_or_branch),
@@ -298,7 +299,7 @@ module hart #(
 	
 	wire dmem_stall;
 	
-	wire        if_flush;
+  wire        if_flush;
   wire        if_id_write_en;
   wire [31:0] if_id_instr = i_imem_rdata;
 
@@ -312,7 +313,7 @@ module hart #(
   ) if_id_registers (
     .i_clk(i_clk),
     .i_rst(i_rst),
-    .halt(halt),
+    .halt(keep_halting),
     .if_flush(if_flush),
     .write_en(if_id_write_en),
     .i_imem_ready(i_imem_ready),
@@ -336,8 +337,6 @@ module hart #(
   
   wire [31:0] id_rs1_data;
   wire [31:0] id_rs2_data;
-  
-  wire        keep_halting;
   
   wire [31:0] id_imm_val;
   wire        id_pc_add;
@@ -377,6 +376,7 @@ module hart #(
   // mem_instr is defined earlier
   wire        mem_halt;
   wire        mem_dmem_read_en;
+  wire        mem_dmem_request_issued;
   // mem_reg_write_en and mem_rd are defined earlier
 
   // wb_instr is defined earlier
@@ -394,6 +394,8 @@ module hart #(
     
     .i_imem_ready(i_imem_ready),
     .i_dmem_ready(i_dmem_ready),
+    .i_dmem_valid(i_dmem_valid),
+    .i_dmem_request_issued(mem_dmem_request_issued),
     .instr_buffer_empty(if_id_buffer_empty),
     .instr_buffer_full(if_id_buffer_full),
     
@@ -407,6 +409,7 @@ module hart #(
     
     .ex_mem_rd(mem_rd),
     .ex_mem_mem_read(mem_dmem_read_en),
+    .ex_mem_mem_write(mem_dmem_write_en),
     .ex_mem_reg_write(mem_reg_write_en),
     
     .mem_wb_rd(wb_rd),
@@ -608,6 +611,7 @@ module hart #(
 
     .i_dmem_read_en(ex_dmem_read_en),
     .i_dmem_write_en(ex_dmem_write_en),
+    .i_dmem_request_accepted(o_dmem_ren | o_dmem_wen),
     .i_funct3(ex_funct3),
 
     .i_imm_val(ex_imm_val),
@@ -632,6 +636,7 @@ module hart #(
 
     .o_dmem_read_en(mem_dmem_read_en),
     .o_dmem_write_en(mem_dmem_write_en),
+    .o_dmem_request_issued(mem_dmem_request_issued),
     .o_funct3(mem_funct3),
 
     .o_imm_val(mem_imm_val),
@@ -643,6 +648,8 @@ module hart #(
 
   wire [31:0] mem_dmem_rdata = i_dmem_rdata;
   wire [31:0] mem_dmem_data;
+  wire        mem_dmem_issue_en = ~mem_dmem_request_issued;
+  wire [31:0] mem_retire_dmem_rdata;
   
   wire [31:0] mem_rs2_with_forwarding = mem_forward_sel == 1'b1 ? mem_forward_data : mem_rs2_data;
   
@@ -652,6 +659,7 @@ module hart #(
     .alu_result(mem_alu_result),
     .i_dmem_read_en(mem_dmem_read_en),
     .i_dmem_write_en(mem_dmem_write_en),
+    .i_dmem_issue_en(mem_dmem_issue_en),
   
     .i_dmem_ready(i_dmem_ready),
     .i_dmem_rdata(mem_dmem_rdata),
@@ -664,7 +672,12 @@ module hart #(
     
     .dmem_data(mem_dmem_data)
   );
-  
+  //more specific byte masking output needed because the gradescope trace wanted it
+  assign mem_retire_dmem_rdata[ 7: 0] = o_dmem_mask[0] ? mem_dmem_rdata[ 7: 0] : 8'hxx;
+  assign mem_retire_dmem_rdata[15: 8] = o_dmem_mask[1] ? mem_dmem_rdata[15: 8] : 8'hxx;
+  assign mem_retire_dmem_rdata[23:16] = o_dmem_mask[2] ? mem_dmem_rdata[23:16] : 8'hxx;
+  assign mem_retire_dmem_rdata[31:24] = o_dmem_mask[3] ? mem_dmem_rdata[31:24] : 8'hxx;
+
   // wb_instr is defined earlier
   // wb_pc is defined earlier
   // wb_next_pc is defined earlier
@@ -715,11 +728,11 @@ module hart #(
     .i_rs2_data(mem_rs2_data),
     
     .i_retire_dmem_addr(o_dmem_addr),
-    .i_retire_dmem_ren(o_dmem_ren),
-    .i_retire_dmem_wen(o_dmem_wen),
+    .i_retire_dmem_ren(mem_dmem_read_en),
+    .i_retire_dmem_wen(mem_dmem_write_en),
     .i_retire_dmem_mask(o_dmem_mask),
     .i_retire_dmem_wdata(o_dmem_wdata),
-    .i_retire_dmem_rdata(mem_dmem_rdata),
+    .i_retire_dmem_rdata(mem_retire_dmem_rdata),
 
     .i_alu_result(mem_alu_result),
     .i_imm_val(mem_imm_val),

@@ -61,20 +61,34 @@ module if_id_registers #(
   reg [31:0] pc;
   reg        valid;  // 3/25 UPDATE: to track validity
 
-  //essentially a queue to temporarily hold PCs for instructions that arrive while pipeline is stalled
+  //essentially two queues to temporarily hold instructions/PCs for instructions that arrive while pipeline is stalled
   reg [31:0] instr_valid [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
   reg [31:0] pc_valid [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
   reg [PTR_BITS - 1:0] pc_head;
   reg [PTR_BITS - 1:0] pc_tail;
   reg [IMEM_INSTR_BUFFER_BITS - 1:0] is_valid_and_halt_counter;
+  //added queue to match returned instructions with their correct PC
+  reg [31:0] request_pc [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
+  reg [PTR_BITS - 1:0] request_head;
+  reg [PTR_BITS - 1:0] request_tail;
+  reg [IMEM_INSTR_BUFFER_BITS - 1:0] request_count;
   //basically like a skip count
   reg [IMEM_INSTR_BUFFER_BITS - 1:0] discard_count;
 
   wire queue_push = i_imem_ren & i_imem_ready &
-                    (is_valid_and_halt_counter != IMEM_BUFFER_COUNT_MAX);
-  wire queue_pop = write_en & i_imem_valid & ~halt &
-                   (discard_count == {IMEM_INSTR_BUFFER_BITS{1'b0}}) &
+                    (request_count != IMEM_BUFFER_COUNT_MAX);
+  wire queue_pop = write_en & ~halt &
                    (is_valid_and_halt_counter != {IMEM_INSTR_BUFFER_BITS{1'b0}});
+  wire response_valid = i_imem_valid &
+                        (discard_count == {IMEM_INSTR_BUFFER_BITS{1'b0}}) &
+                        (request_count != {IMEM_INSTR_BUFFER_BITS{1'b0}});
+  //flushed
+  wire response_discard = i_imem_valid &
+                          (discard_count != {IMEM_INSTR_BUFFER_BITS{1'b0}});
+  //no waiting required, nothing in bugger pipeline not stalled
+  wire response_to_output = response_valid & write_en & ~halt &
+                            (is_valid_and_halt_counter == {IMEM_INSTR_BUFFER_BITS{1'b0}});
+  wire response_to_buffer = response_valid & ~response_to_output;
 
   assign o_instr = instr;
   assign o_pc = pc;
@@ -100,6 +114,9 @@ module if_id_registers #(
       pc_head <= {PTR_BITS{1'b0}};
       pc_tail <= {PTR_BITS{1'b0}};
       is_valid_and_halt_counter <= {IMEM_INSTR_BUFFER_BITS{1'b0}};
+      request_head <= {PTR_BITS{1'b0}};
+      request_tail <= {PTR_BITS{1'b0}};
+      request_count <= {IMEM_INSTR_BUFFER_BITS{1'b0}};
       discard_count <= {IMEM_INSTR_BUFFER_BITS{1'b0}};
     //flush on control flow change, but do not clear the buffer as these instructions may still be valid
     end else if (if_flush) begin
@@ -108,17 +125,60 @@ module if_id_registers #(
       valid <= 1'b0;
       pc_head <= {PTR_BITS{1'b0}};
       pc_tail <= {PTR_BITS{1'b0}};
-      discard_count <= is_valid_and_halt_counter;
       is_valid_and_halt_counter <= {IMEM_INSTR_BUFFER_BITS{1'b0}};
+      //requests from the old path will still return, but they should be ignored
+      discard_count <= queue_push ? (request_count + 1'b1) : request_count;
+      request_head <= {PTR_BITS{1'b0}};
+      request_tail <= {PTR_BITS{1'b0}};
+      request_count <= {IMEM_INSTR_BUFFER_BITS{1'b0}};
     // push to buffer if new instruction is valid and pipeline is not stalled, pop from buffer if pipeline is not stalled and there are instructions in the buffer
     end else begin
-      if (i_imem_valid & (discard_count != {IMEM_INSTR_BUFFER_BITS{1'b0}})) begin
+      if (response_discard) begin
         discard_count <= discard_count - 1'b1;
       end else begin
         discard_count <= discard_count;
       end
+      //new memory request
+      if (queue_push) begin
+        request_pc[request_tail] <= i_pc;
+        request_tail <= request_tail + 1'b1;
+      end else begin
+        request_tail <= request_tail;
+      end
+      //dequeue
+      if (response_valid) begin
+        request_head <= request_head + 1'b1;
+      end else begin
+        request_head <= request_head;
+      end
+      //track number of valid requests
+      case ({queue_push, response_valid})
+        2'b10: request_count <= request_count + 1'b1;
+        2'b01: request_count <= request_count - 1'b1;
+        default: request_count <= request_count;
+      endcase
+      //cannot go directly to pipeline
+      if (response_to_buffer) begin
+        instr_valid[pc_tail] <= i_instr;
+        pc_valid[pc_tail] <= request_pc[request_head];
+        pc_tail <= pc_tail + 1'b1;
+      end else begin
+        pc_tail <= pc_tail;
+      end
 
-      casez ({halt, write_en, queue_push, queue_pop})
+      if (queue_pop) begin
+        pc_head <= pc_head + 1'b1;
+      end else begin
+        pc_head <= pc_head;
+      end
+      //track number of instructions
+      case ({response_to_buffer, queue_pop})
+        2'b10: is_valid_and_halt_counter <= is_valid_and_halt_counter + 1'b1;
+        2'b01: is_valid_and_halt_counter <= is_valid_and_halt_counter - 1'b1;
+        default: is_valid_and_halt_counter <= is_valid_and_halt_counter;
+      endcase
+
+      casez ({halt, write_en, response_to_output, queue_pop})
         //halt
         4'b1??? : begin
           instr <= NOP_INSTRUCTION;
@@ -126,40 +186,16 @@ module if_id_registers #(
           valid <= 1'b0;  // 3/25 UPDATE
         end
         //normal
-        4'b0111 : begin
-          instr <= i_instr;
-          pc <= pc_valid[pc_head];
-          valid <= 1'b1;
-          pc_valid[pc_tail] <= i_pc;
-          pc_head <= pc_head + 1'b1;
-          pc_tail <= pc_tail + 1'b1;
-          is_valid_and_halt_counter <= is_valid_and_halt_counter;
-        end
-        //new instruction but pipeline stalled
         4'b0110 : begin
-          instr <= NOP_INSTRUCTION;
-          pc <= pc;
-          valid <= 1'b0;
-          pc_valid[pc_tail] <= i_pc;
-          pc_tail <= pc_tail + 1'b1;
-          is_valid_and_halt_counter <= is_valid_and_halt_counter + 1'b1;
-        end
-        //pinpeline not stalled but no new instruction
-        4'b0010 : begin
-          instr <= NOP_INSTRUCTION;
-          pc <= pc;
-          valid <= 1'b0;
-          pc_valid[pc_tail] <= i_pc;
-          pc_tail <= pc_tail + 1'b1;
-          is_valid_and_halt_counter <= is_valid_and_halt_counter + 1'b1;
-        end
-        //pipeline not stalled, no new instruction
-        4'b0101 : begin
           instr <= i_instr;
+          pc <= request_pc[request_head];
+          valid <= 1'b1;
+        end
+        //pipeline not stalled, buffered instruction first
+        4'b0101 : begin
+          instr <= instr_valid[pc_head];
           pc <= pc_valid[pc_head];
           valid <= 1'b1;
-          pc_head <= pc_head + 1'b1;
-          is_valid_and_halt_counter <= is_valid_and_halt_counter - 1'b1;
         end
         //empty queue
         4'b0100 : begin

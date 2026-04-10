@@ -91,9 +91,8 @@ module mem_wb_registers #(
 );
 
   always @(posedge i_clk) begin
-    o_is_halting <= i_is_halting;
-
     if (mem_flush | i_rst) begin
+      o_is_halting <= 1'b0;
       o_instr <= NOP_INSTRUCTION;
       o_pc <= i_rst == 1'b1 ? RESET_ADDR : o_pc;
       o_next_pc <= i_rst == 1'b1 ? RESET_ADDR + 4: o_next_pc;
@@ -116,6 +115,7 @@ module mem_wb_registers #(
       
       o_is_retiring <= 1'b0;
     end else if (i_is_stalling) begin
+      o_is_halting <= o_is_halting;
       o_instr <= o_instr;
       o_pc <= o_pc;
       o_next_pc <= o_next_pc;
@@ -138,8 +138,9 @@ module mem_wb_registers #(
       
       // This line may be problematic, as cycle delays due to memory access
       // mean that this line should be low
-      o_is_retiring <= o_is_retiring;
+      o_is_retiring <= 1'b0;
     end else begin
+      o_is_halting <= i_is_halting;
       o_instr <= i_instr;
       o_pc <= i_pc;
       o_next_pc <= i_next_pc;

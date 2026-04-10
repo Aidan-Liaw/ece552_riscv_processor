@@ -12,6 +12,8 @@ module decode (
   
   input  wire        i_imem_ready,
   input  wire        i_dmem_ready,
+  input  wire        i_dmem_valid,
+  input  wire        i_dmem_request_issued,
   
   input  wire        instr_buffer_empty,
   input  wire        instr_buffer_full,
@@ -25,6 +27,7 @@ module decode (
   input  wire        id_ex_mem_read,
   input  wire [ 4:0] ex_mem_rd,
   input  wire        ex_mem_mem_read,
+  input  wire        ex_mem_mem_write,
   input  wire        ex_mem_reg_write,
   input  wire [ 4:0] mem_wb_rd,
   input  wire        mem_wb_reg_write,
@@ -155,10 +158,17 @@ module decode (
 	  opcode, is_branch_taken, jump, register_jump_target, immediate_jump_target, o_next_pc);
 	 
 	wire if_id_is_hazard_free;
-	assign if_id_write_en = i_imem_ready | if_id_is_hazard_free;
+	wire pc_write_en_hazard_free;
+	wire cu_passthrough_en_hazard_free;
 	
-	// Stall if the D-Mem is not ready to accept a request, and the instruction at the MEM stage must read from D-Mem
-	assign dmem_stall = (~i_dmem_ready) & ex_mem_mem_read;
+	//Stall stores until the request is accepted, and stall loads until the read
+	//data actually returns. i_dmem_ready only tells us the request can be
+	//accepted, not that the load value is ready.
+	assign dmem_stall = (ex_mem_mem_read & ((~i_dmem_request_issued) | (~i_dmem_valid))) |
+	                    (ex_mem_mem_write & (~i_dmem_ready));
+	assign if_id_write_en = if_id_is_hazard_free & (~dmem_stall);
+	assign pc_write_en = pc_write_en_hazard_free & (~dmem_stall);
+	assign cu_passthrough_en = cu_passthrough_en_hazard_free & (~dmem_stall);
 
 	branch_hazard_detector branch_hazard_detector(
 	  .i_rst(i_rst),
@@ -171,8 +181,8 @@ module decode (
     .ex_mem_rd(ex_mem_rd),
     .ex_mem_reg_write(ex_mem_reg_write), 
     .if_id_write_en(if_id_is_hazard_free),
-    .pc_write_en(pc_write_en),
-    .cu_passthrough_en(cu_passthrough_en)
+    .pc_write_en(pc_write_en_hazard_free),
+    .cu_passthrough_en(cu_passthrough_en_hazard_free)
   );
 		
     /* CHANGED: 

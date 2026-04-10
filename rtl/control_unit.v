@@ -190,7 +190,6 @@ module control_unit (
           // which differs from the WISC-F25 standard that sets this imm[11:0] to all 0's
           8'b1_111_0011: begin
             halt_generate = 1'b1;
-            if_flush = 1'b1;
           end
 
           8'b0_???????: begin

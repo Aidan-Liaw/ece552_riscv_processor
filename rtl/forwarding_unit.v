@@ -99,8 +99,8 @@ module forwarding_unit(
                             & ((id_ex_rs[9:5] == ex_mem_rd) | (id_ex_rs[9:5] == mem_wb_rd));
       
       // For load to store
-      mem_forward_sel <= (ex_mem_mem_write == mem_wb_reg_write)
-                         & (ex_mem_rd == 5'd0)
+      mem_forward_sel <= (ex_mem_mem_write & mem_wb_reg_write)
+                         & (ex_mem_rs[9:5] != 5'd0)
                          & (ex_mem_rs[9:5] == mem_wb_rd);
     end
     
