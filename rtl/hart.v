@@ -277,7 +277,62 @@ module hart #(
     .mem_forward_sel(mem_forward_sel)
   );
 
-  wire        keep_halting;
+  wire keep_halting;
+
+  wire [31:0] icache_mem_addr;
+  wire        icache_mem_ren;
+  wire        icache_mem_wen;
+  wire [31:0] icache_mem_wdata;
+  wire [31:0] icache_mem_rdata; 
+  wire        icache_mem_valid;
+  wire        icache_mem_ready;
+  wire        icache_busy;
+  wire        dcache_busy;
+  wire [31:0] icache_rdata;     
+  reg         icache_busy_q;
+  wire        ifetch_req_ren;
+
+  assign o_imem_raddr     = icache_mem_addr;
+  assign o_imem_ren       = icache_mem_ren;
+  assign icache_mem_ready = i_imem_ready;
+  assign icache_mem_rdata = i_imem_rdata;
+  assign icache_mem_valid = i_imem_valid;
+
+  cache icache (
+    .i_clk       (i_clk),
+    .i_rst       (i_rst),
+    .i_mem_ready (icache_mem_ready),
+    .o_mem_addr  (icache_mem_addr),
+    .o_mem_ren   (icache_mem_ren),
+    .o_mem_wen   (icache_mem_wen),
+    .o_mem_wdata (icache_mem_wdata),
+    .i_mem_rdata (icache_mem_rdata),
+    .i_mem_valid (icache_mem_valid),
+    .o_busy      (icache_busy),
+    .i_req_addr  (if_pc),
+    .i_req_ren   (ifetch_req_ren),
+    .i_req_wen   (1'b0),
+    .i_req_mask  (4'b1111),
+    .i_req_wdata (32'b0),
+    .o_res_rdata (icache_rdata)
+  );
+
+  //needed else there exists a loop: fetch -> i_req_ren -> cache logic -> o_busy -> fetch
+  always @(posedge i_clk) begin
+    if (i_rst)
+      icache_busy_q <= 1'b0;
+    else
+      icache_busy_q <= icache_busy;
+  end
+
+  //prevents duplicate requests when busy is high and busy_q is oudated
+  wire ifetch_ready = ~icache_busy_q;
+  wire ifetch_req_accepted = ifetch_req_ren & ifetch_ready;
+  wire ifetch_hit_resp = ifetch_req_accepted & ~icache_busy;
+  wire ifetch_miss_resp = icache_busy_q & ~icache_busy;
+  wire ifetch_resp_valid = ifetch_hit_resp | ifetch_miss_resp;
+  wire ifetch_queue_ready = (~icache_busy) | ((~icache_busy_q) & icache_busy);
+
   fetch  #(
     .RESET_ADDR(32'h00000000)
   ) fetch (
@@ -288,26 +343,23 @@ module hart #(
     .target_pc(id_ex_next_pc),
     .is_jump_or_branch(is_jump_or_branch),
     .pc_write_en(pc_write_en),
-    .i_imem_ready(i_imem_ready),
+    .i_imem_ready(ifetch_ready),
     
     .pc(if_pc),
     .pc_plus_4(if_pc_plus_4),
-    .o_imem_ren(o_imem_ren)
+    .o_imem_ren(ifetch_req_ren)
   );
-
-	assign o_imem_raddr = if_pc;
 	
 	wire dmem_stall;
 	
   wire        if_flush;
   wire        if_id_write_en;
-  wire [31:0] if_id_instr = i_imem_rdata;
+  wire [31:0] if_id_instr = icache_rdata;
 
   wire id_valid; // 3/25 UPDATE
   wire if_id_buffer_full;
   wire if_id_buffer_empty;
-  
-  
+
   if_id_registers #(
     .NOP_INSTRUCTION(32'h00000013)
   ) if_id_registers (
@@ -316,12 +368,12 @@ module hart #(
     .halt(keep_halting),
     .if_flush(if_flush),
     .write_en(if_id_write_en),
-    .i_imem_ready(i_imem_ready),
-    .i_imem_ren(o_imem_ren),
+    .i_imem_ready(ifetch_queue_ready),
+    .i_imem_ren(ifetch_req_ren),
     
     .i_instr(if_id_instr),
     .i_pc(if_pc),
-    .i_imem_valid(i_imem_valid),
+    .i_imem_valid(ifetch_resp_valid),
 
     .o_instr(id_instr),
     .o_pc(id_pc),
@@ -392,10 +444,8 @@ module hart #(
     .i_pc(id_pc),
     .i_valid(id_valid),
     
-    .i_imem_ready(i_imem_ready),
-    .i_dmem_ready(i_dmem_ready),
-    .i_dmem_valid(i_dmem_valid),
-    .i_dmem_request_issued(mem_dmem_request_issued),
+    .icache_busy(icache_busy),
+    .dcache_busy(dcache_busy),
     .instr_buffer_empty(if_id_buffer_empty),
     .instr_buffer_full(if_id_buffer_full),
     
@@ -611,7 +661,6 @@ module hart #(
 
     .i_dmem_read_en(ex_dmem_read_en),
     .i_dmem_write_en(ex_dmem_write_en),
-    .i_dmem_request_accepted(o_dmem_ren | o_dmem_wen),
     .i_funct3(ex_funct3),
 
     .i_imm_val(ex_imm_val),
@@ -627,7 +676,6 @@ module hart #(
     
     .o_is_halting(mem_is_halting),
 
-
     .o_rs1_data(mem_rs1_data),
     .o_rs2_data(mem_rs2_data),
 
@@ -636,7 +684,6 @@ module hart #(
 
     .o_dmem_read_en(mem_dmem_read_en),
     .o_dmem_write_en(mem_dmem_write_en),
-    .o_dmem_request_issued(mem_dmem_request_issued),
     .o_funct3(mem_funct3),
 
     .o_imm_val(mem_imm_val),
@@ -646,37 +693,75 @@ module hart #(
     .o_is_retiring(mem_is_retiring)
   );
 
-  wire [31:0] mem_dmem_rdata = i_dmem_rdata;
+  wire [31:0] dcache_mem_addr;
+  wire        dcache_mem_ren;
+  wire        dcache_mem_wen;
+  wire [31:0] dcache_mem_wdata;
+  wire [31:0] dcache_mem_rdata;
+  wire        dcache_mem_valid;
+  wire        dcache_mem_ready;
+  wire [31:0] dcache_rdata;
+
+  assign dcache_mem_ready = i_dmem_ready;
+  assign dcache_mem_rdata = i_dmem_rdata;
+  assign dcache_mem_valid = i_dmem_valid;
+
+  wire [31:0] cpu_dmem_addr;
+  wire        cpu_dmem_ren;
+  wire        cpu_dmem_wen;
+  wire [31:0] cpu_dmem_wdata;
+  wire [ 3:0] cpu_dmem_mask;
+
+  cache dcache (
+    .i_clk       (i_clk),
+    .i_rst       (i_rst),
+    .i_mem_ready (dcache_mem_ready),
+    .o_mem_addr  (dcache_mem_addr),
+    .o_mem_ren   (dcache_mem_ren),
+    .o_mem_wen   (dcache_mem_wen),
+    .o_mem_wdata (dcache_mem_wdata),
+    .i_mem_rdata (dcache_mem_rdata),
+    .i_mem_valid (dcache_mem_valid),
+    .o_busy      (dcache_busy),
+    .i_req_addr  (cpu_dmem_addr),
+    .i_req_ren   (cpu_dmem_ren),
+    .i_req_wen   (cpu_dmem_wen),
+    .i_req_mask  (cpu_dmem_mask),
+    .i_req_wdata (cpu_dmem_wdata),
+    .o_res_rdata (dcache_rdata)
+  );
+  assign o_dmem_addr  = dcache_mem_addr;
+  assign o_dmem_ren   = dcache_mem_ren;
+  assign o_dmem_wen   = dcache_mem_wen;
+  assign o_dmem_wdata = dcache_mem_wdata;
+  assign o_dmem_mask  = cpu_dmem_mask;
+
+  wire [31:0] mem_dmem_rdata = dcache_rdata;
   wire [31:0] mem_dmem_data;
-  wire        mem_dmem_issue_en = ~mem_dmem_request_issued;
   wire [31:0] mem_retire_dmem_rdata;
-  
   wire [31:0] mem_rs2_with_forwarding = mem_forward_sel == 1'b1 ? mem_forward_data : mem_rs2_data;
-  
+
   memory_stage memory_stage (
     .funct3(mem_funct3),
     .rs2_data(mem_rs2_with_forwarding),
     .alu_result(mem_alu_result),
     .i_dmem_read_en(mem_dmem_read_en),
     .i_dmem_write_en(mem_dmem_write_en),
-    .i_dmem_issue_en(mem_dmem_issue_en),
-  
-    .i_dmem_ready(i_dmem_ready),
     .i_dmem_rdata(mem_dmem_rdata),
     
-    .o_dmem_addr(o_dmem_addr),
-    .o_dmem_ren(o_dmem_ren),
-    .o_dmem_wen(o_dmem_wen),
-    .o_dmem_wdata(o_dmem_wdata),
-    .o_dmem_mask(o_dmem_mask),
+    .o_dmem_addr(cpu_dmem_addr),
+    .o_dmem_ren(cpu_dmem_ren),
+    .o_dmem_wen(cpu_dmem_wen),
+    .o_dmem_wdata(cpu_dmem_wdata),
+    .o_dmem_mask(cpu_dmem_mask),
     
     .dmem_data(mem_dmem_data)
   );
   //more specific byte masking output needed because the gradescope trace wanted it
-  assign mem_retire_dmem_rdata[ 7: 0] = o_dmem_mask[0] ? mem_dmem_rdata[ 7: 0] : 8'hxx;
-  assign mem_retire_dmem_rdata[15: 8] = o_dmem_mask[1] ? mem_dmem_rdata[15: 8] : 8'hxx;
-  assign mem_retire_dmem_rdata[23:16] = o_dmem_mask[2] ? mem_dmem_rdata[23:16] : 8'hxx;
-  assign mem_retire_dmem_rdata[31:24] = o_dmem_mask[3] ? mem_dmem_rdata[31:24] : 8'hxx;
+  assign mem_retire_dmem_rdata[ 7: 0] = cpu_dmem_mask[0] ? mem_dmem_rdata[ 7: 0] : 8'hxx;
+  assign mem_retire_dmem_rdata[15: 8] = cpu_dmem_mask[1] ? mem_dmem_rdata[15: 8] : 8'hxx;
+  assign mem_retire_dmem_rdata[23:16] = cpu_dmem_mask[2] ? mem_dmem_rdata[23:16] : 8'hxx;
+  assign mem_retire_dmem_rdata[31:24] = cpu_dmem_mask[3] ? mem_dmem_rdata[31:24] : 8'hxx;
 
   // wb_instr is defined earlier
   // wb_pc is defined earlier
@@ -727,11 +812,11 @@ module hart #(
     .i_rs1_data(mem_rs1_data),
     .i_rs2_data(mem_rs2_data),
     
-    .i_retire_dmem_addr(o_dmem_addr),
-    .i_retire_dmem_ren(mem_dmem_read_en),
-    .i_retire_dmem_wen(mem_dmem_write_en),
-    .i_retire_dmem_mask(o_dmem_mask),
-    .i_retire_dmem_wdata(o_dmem_wdata),
+    .i_retire_dmem_addr(cpu_dmem_addr),
+    .i_retire_dmem_ren(cpu_dmem_ren),
+    .i_retire_dmem_wen(cpu_dmem_wen),
+    .i_retire_dmem_mask(cpu_dmem_mask),
+    .i_retire_dmem_wdata(cpu_dmem_wdata),
     .i_retire_dmem_rdata(mem_retire_dmem_rdata),
 
     .i_alu_result(mem_alu_result),

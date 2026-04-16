@@ -44,7 +44,6 @@ module ex_mem_registers #(
   // Memory stage/Data Memory control
   input  wire        i_dmem_read_en,
   input  wire        i_dmem_write_en,
-  input  wire        i_dmem_request_accepted,
   input  wire [ 2:0] i_funct3,
   // Writeback stage
   input  wire [31:0] i_imm_val,
@@ -52,8 +51,6 @@ module ex_mem_registers #(
   input  wire [ 1:0] i_register_write_sel, 
   
   input  wire        i_is_retiring,
-
-
   
   output reg  [31:0] o_instr = NOP_INSTRUCTION,
   output reg  [31:0] o_pc = RESET_ADDR,
@@ -61,7 +58,6 @@ module ex_mem_registers #(
   
   output reg         o_is_halting,
 
-  
   // Register data
   output reg  [31:0] o_rs1_data,
   output reg  [31:0] o_rs2_data,
@@ -73,7 +69,6 @@ module ex_mem_registers #(
   // Memory stage/Data Memory control
   output reg         o_dmem_read_en,
   output reg         o_dmem_write_en,
-  output reg         o_dmem_request_issued,
   output reg  [ 2:0] o_funct3,
   // Writeback stage
   output reg  [31:0] o_imm_val,
@@ -97,7 +92,6 @@ module ex_mem_registers #(
 
       o_dmem_read_en <= 1'b0;
       o_dmem_write_en <= 1'b0;
-      o_dmem_request_issued <= 1'b0;
       o_funct3 <= 3'd0;
 
       o_imm_val <= 32'd0;
@@ -118,7 +112,6 @@ module ex_mem_registers #(
 
       o_dmem_read_en <= o_dmem_read_en;
       o_dmem_write_en <= o_dmem_write_en;
-      o_dmem_request_issued <= i_dmem_request_accepted ? 1'b1 : o_dmem_request_issued;
       o_funct3 <= o_funct3;
 
       o_imm_val <= o_imm_val;
@@ -139,7 +132,6 @@ module ex_mem_registers #(
 
       o_dmem_read_en <= i_dmem_read_en;
       o_dmem_write_en <= i_dmem_write_en;
-      o_dmem_request_issued <= 1'b0;
       o_funct3 <= i_funct3;
 
       o_imm_val <= i_imm_val;

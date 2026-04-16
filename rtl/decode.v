@@ -10,10 +10,8 @@ module decode (
   input  wire [31:0] i_pc,
   input  wire        i_valid,
   
-  input  wire        i_imem_ready,
-  input  wire        i_dmem_ready,
-  input  wire        i_dmem_valid,
-  input  wire        i_dmem_request_issued,
+  input  wire        icache_busy,
+  input  wire        dcache_busy,
   
   input  wire        instr_buffer_empty,
   input  wire        instr_buffer_full,
@@ -154,20 +152,16 @@ module decode (
   // safely combine the cu flush with our jump flush
   assign if_flush = cu_if_flush | o_is_jump_or_branch;
 
-	next_pc_setter next_pc_setter(i_pc, i_imem_ready, i_dmem_ready, instr_buffer_empty, instr_buffer_full, 
+	next_pc_setter next_pc_setter(i_pc, !icache_busy, !dcache_busy, instr_buffer_empty, instr_buffer_full, 
 	  opcode, is_branch_taken, jump, register_jump_target, immediate_jump_target, o_next_pc);
 	 
 	wire if_id_is_hazard_free;
 	wire pc_write_en_hazard_free;
 	wire cu_passthrough_en_hazard_free;
 	
-	//Stall stores until the request is accepted, and stall loads until the read
-	//data actually returns. i_dmem_ready only tells us the request can be
-	//accepted, not that the load value is ready.
-	assign dmem_stall = (ex_mem_mem_read & ((~i_dmem_request_issued) | (~i_dmem_valid))) |
-	                    (ex_mem_mem_write & (~i_dmem_ready));
+	assign dmem_stall = dcache_busy;
 	assign if_id_write_en = if_id_is_hazard_free & (~dmem_stall);
-	assign pc_write_en = pc_write_en_hazard_free & (~dmem_stall);
+	assign pc_write_en = pc_write_en_hazard_free;
 	assign cu_passthrough_en = cu_passthrough_en_hazard_free & (~dmem_stall);
 
 	branch_hazard_detector branch_hazard_detector(

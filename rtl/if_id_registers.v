@@ -75,13 +75,17 @@ module if_id_registers #(
   //basically like a skip count
   reg [IMEM_INSTR_BUFFER_BITS - 1:0] discard_count;
 
-  wire queue_push = i_imem_ren & i_imem_ready &
+  //cache hit, respond in same cycle
+  wire immediate_response = i_imem_ren & i_imem_ready & i_imem_valid;
+  //cache miss
+  wire queue_push = i_imem_ren & i_imem_ready & ~i_imem_valid &
                     (request_count != IMEM_BUFFER_COUNT_MAX);
   wire queue_pop = write_en & ~halt &
                    (is_valid_and_halt_counter != {IMEM_INSTR_BUFFER_BITS{1'b0}});
   wire response_valid = i_imem_valid &
                         (discard_count == {IMEM_INSTR_BUFFER_BITS{1'b0}}) &
-                        (request_count != {IMEM_INSTR_BUFFER_BITS{1'b0}});
+                        (immediate_response | (request_count != {IMEM_INSTR_BUFFER_BITS{1'b0}}));
+  wire response_queued = response_valid & ~immediate_response;
   //flushed
   wire response_discard = i_imem_valid &
                           (discard_count != {IMEM_INSTR_BUFFER_BITS{1'b0}});
@@ -146,13 +150,13 @@ module if_id_registers #(
         request_tail <= request_tail;
       end
       //dequeue
-      if (response_valid) begin
+      if (response_queued) begin
         request_head <= request_head + 1'b1;
       end else begin
         request_head <= request_head;
       end
       //track number of valid requests
-      case ({queue_push, response_valid})
+      case ({queue_push, response_queued})
         2'b10: request_count <= request_count + 1'b1;
         2'b01: request_count <= request_count - 1'b1;
         default: request_count <= request_count;
@@ -160,7 +164,7 @@ module if_id_registers #(
       //cannot go directly to pipeline
       if (response_to_buffer) begin
         instr_valid[pc_tail] <= i_instr;
-        pc_valid[pc_tail] <= request_pc[request_head];
+        pc_valid[pc_tail] <= immediate_response ? i_pc : request_pc[request_head];
         pc_tail <= pc_tail + 1'b1;
       end else begin
         pc_tail <= pc_tail;
@@ -188,7 +192,7 @@ module if_id_registers #(
         //normal
         4'b0110 : begin
           instr <= i_instr;
-          pc <= request_pc[request_head];
+          pc <= immediate_response ? i_pc : request_pc[request_head];
           valid <= 1'b1;
         end
         //pipeline not stalled, buffered instruction first
