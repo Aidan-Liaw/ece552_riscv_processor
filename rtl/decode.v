@@ -133,6 +133,8 @@ module decode (
   	
   ///// branch and next pc logic /////
   wire is_branch_taken;
+  wire is_jal = i_valid & (opcode == 7'b110_1111);
+  wire is_jalr = i_valid & (opcode == 7'b110_0111);
   //slight fix 
   wire [31:0] register_jump_base_address = id_forward_sel[0] ? id_forward_data_rs1 : rs1_data;
   wire [31:0] register_jump_target  = (register_jump_base_address + imm_val) & 32'hFFFFFFFE; // Clears LSBit
@@ -144,13 +146,20 @@ module decode (
     wire [31:0] rs2_branch = id_forward_sel[1] ? id_forward_data_rs2 : rs2_data;
 	branch_condition_checker branch_condition_checker(i_rst, branch, funct3, rs1_branch, rs2_branch, is_branch_taken);
 	
-  // only trigger a jump if the branch is taken and the pipeline is not stalled
+  // JAL does not depend on a data hazard in decode, so allow its redirect even
+  // if decode passthrough is temporarily low due to an older memory stall.
+  // Branches and JALR still require the decode-stage gating because their
+  // target/decision depends on decode-stage operands.
+  wire redirect_control_flow =
+      is_jal |
+      (is_jalr & cu_passthrough_en) |
+      ((branch & is_branch_taken & i_valid) & cu_passthrough_en);
+
   assign o_is_jump = jump;  // 3/25 UPDATE: removed '& cu_passthrough_en;'
   assign o_is_branch = branch;  // 3/25 UPDATE: removed '& is_branch_taken & cu_passthrough_en;'
-  assign o_is_jump_or_branch = ((branch & is_branch_taken) | jump) & cu_passthrough_en;
+  assign o_is_jump_or_branch = redirect_control_flow;
 
-  // safely combine the cu flush with our jump flush
-  assign if_flush = cu_if_flush | o_is_jump_or_branch;
+  assign if_flush = 1'b0;
 
 	next_pc_setter next_pc_setter(i_pc, !icache_busy, !dcache_busy, instr_buffer_empty, instr_buffer_full, 
 	  opcode, is_branch_taken, jump, register_jump_target, immediate_jump_target, o_next_pc);

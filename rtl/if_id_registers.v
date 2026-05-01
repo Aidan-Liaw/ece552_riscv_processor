@@ -130,8 +130,10 @@ module if_id_registers #(
       pc_head <= {PTR_BITS{1'b0}};
       pc_tail <= {PTR_BITS{1'b0}};
       is_valid_and_halt_counter <= {IMEM_INSTR_BUFFER_BITS{1'b0}};
-      //requests from the old path will still return, but they should be ignored
-      discard_count <= queue_push ? (request_count + 1'b1) : request_count;
+      // Discard only the already-outstanding old-path requests. Counting the
+      // same-cycle request here can drop the first instruction at the redirect
+      // target, which shows up as target+4 retirement after taken branches.
+      discard_count <= request_count;
       request_head <= {PTR_BITS{1'b0}};
       request_tail <= {PTR_BITS{1'b0}};
       request_count <= {IMEM_INSTR_BUFFER_BITS{1'b0}};

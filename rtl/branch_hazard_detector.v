@@ -34,9 +34,13 @@ module branch_hazard_detector(
     wire load_use_hazard;
     wire load_mem_hazard;
     wire alu_hazard;
+    wire same_load_in_decode;
+
+    assign same_load_in_decode = (opcode == 7'b0000011) & id_ex_mem_read &
+        (id_ex_rd != 0) & (id_ex_rd == instr[11:7]);
 
     //standard stall after lw
-    assign load_use_hazard = id_ex_mem_read & 
+    assign load_use_hazard = id_ex_mem_read & ~same_load_in_decode &
         (id_ex_rd != 0) & (((id_ex_rd == rs1) & rs1_rd) |
         ((id_ex_rd == rs2) & rs2_rd));
 

@@ -325,8 +325,11 @@ module hart #(
       icache_busy_q <= icache_busy;
   end
 
+  wire id_valid;
+  wire if_id_buffer_empty;
+
   //prevents duplicate requests when busy is high and busy_q is oudated
-  wire ifetch_ready = ~icache_busy_q;
+  wire ifetch_ready = (~icache_busy_q) & if_id_buffer_empty & (~id_valid);
   wire ifetch_req_accepted = ifetch_req_ren & ifetch_ready;
   wire ifetch_hit_resp = ifetch_req_accepted & ~icache_busy;
   wire ifetch_miss_resp = icache_busy_q & ~icache_busy;
@@ -356,9 +359,7 @@ module hart #(
   wire        if_id_write_en;
   wire [31:0] if_id_instr = icache_rdata;
 
-  wire id_valid; // 3/25 UPDATE
   wire if_id_buffer_full;
-  wire if_id_buffer_empty;
 
   if_id_registers #(
     .NOP_INSTRUCTION(32'h00000013)
@@ -734,7 +735,7 @@ module hart #(
   assign o_dmem_ren   = dcache_mem_ren;
   assign o_dmem_wen   = dcache_mem_wen;
   assign o_dmem_wdata = dcache_mem_wdata;
-  assign o_dmem_mask  = cpu_dmem_mask;
+  assign o_dmem_mask  = dcache_mem_wen ? 4'hf : cpu_dmem_mask;
 
   wire [31:0] mem_dmem_rdata = dcache_rdata;
   wire [31:0] mem_dmem_data;

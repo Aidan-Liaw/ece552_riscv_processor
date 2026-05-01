@@ -57,28 +57,25 @@ module forwarding_unit(
     );
     
     wire is_id_ex_imm = id_ex_instr[6:0] == 7'b011_0111;
-    wire is_id_ex_pc_plus_4 = id_ex_instr[6:0] == 7'b110_0011;
+    wire is_id_ex_pc_plus_4 = (id_ex_instr[6:0] == 7'b110_1111) | (id_ex_instr[6:0] == 7'b110_0111);
     
     wire is_ex_mem_imm = ex_mem_instr[6:0] == 7'b011_0111;
-    wire is_ex_mem_pc_plus_4 = ex_mem_instr[6:0] == 7'b110_0011;
+    wire is_ex_mem_pc_plus_4 = (ex_mem_instr[6:0] == 7'b110_1111) | (ex_mem_instr[6:0] == 7'b110_0111);
     wire is_ex_mem_lui = ex_mem_instr[6:0] == 7'b0110111;  // LUI opcode
-    wire is_ex_mem_auipc = ex_mem_instr[6:0] == 7'b0010111;
     
     wire is_mem_wb_imm = mem_wb_instr[6:0] == 7'b011_0111;
-    wire is_mem_wb_pc_plus_4 = mem_wb_instr[6:0] == 7'b110_0011;
+    wire is_mem_wb_pc_plus_4 = (mem_wb_instr[6:0] == 7'b110_1111) | (mem_wb_instr[6:0] == 7'b110_0111);
     wire is_mem_wb_lui = mem_wb_instr[6:0] == 7'b0110111;   // Add this
-    wire is_mem_wb_auipc = mem_wb_instr[6:0] == 7'b0010111;
 
     wire [31:0] ex_mem_forward_value;
     assign ex_mem_forward_value = 
         is_ex_mem_lui ? {ex_mem_instr[31:12], 12'b0} :
-        is_ex_mem_auipc ? ex_mem_pc :  
+        is_ex_mem_pc_plus_4 ? ex_mem_pc + 32'd4 :
         ex_mem_data;  
 
     wire [31:0] mem_wb_forward_value;
     assign mem_wb_forward_value = 
         is_mem_wb_lui ? {mem_wb_instr[31:12], 12'b0} :
-        is_mem_wb_auipc ? mem_wb_pc :
         mem_wb_data;
 
     
