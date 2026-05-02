@@ -312,9 +312,8 @@ module cache (
         next_state = state;
         case (state)
             IDLE: begin
-                casez ({((i_req_ren | i_req_wen) & !hit), (i_req_wen & hit)})
-                    2'b10: next_state = REFILL;
-                    2'b01: next_state = WRITE_THROUGH;
+                case (((i_req_ren | i_req_wen) & !hit))
+                    1'b1: next_state = REFILL;
                     default: next_state = IDLE;
                 endcase
             end
@@ -342,8 +341,7 @@ module cache (
         endcase
     end
 
-    wire write_hit_blocked = (state == IDLE) && i_req_wen && hit && wt_pending && !i_mem_ready;
-    assign o_busy = (state != IDLE) | ((i_req_ren | i_req_wen) & !hit) | write_hit_blocked;
+    assign o_busy = (state != IDLE) | ((i_req_ren | i_req_wen) & !hit);
 
     //sequential logic
     always @(posedge i_clk) begin
@@ -401,6 +399,28 @@ module cache (
                         is_write <= 1'b1;
                         req_wdata <= merged_hit_word;
                         req_mask <= i_req_mask;
+
+                        //if memory is busy, queue one pending write.
+                        if (wt_pending) begin
+                            if (i_mem_ready) begin
+                                mem_wen <= 1'b1;
+                                mem_addr <= wt_addr;
+                                mem_wdata <= wt_wdata;
+                                wt_pending <= 1'b1;
+                                wt_addr <= i_req_addr;
+                                wt_wdata <= merged_hit_word;
+                            end
+                        end else begin
+                            if (i_mem_ready) begin
+                                mem_wen <= 1'b1;
+                                mem_addr <= i_req_addr;
+                                mem_wdata <= merged_hit_word;
+                            end else begin
+                                wt_pending <= 1'b1;
+                                wt_addr <= i_req_addr;
+                                wt_wdata <= merged_hit_word;
+                            end
+                        end
                     end else begin
                         //consume pending write-through when memory can accept it.
                         if (!((i_req_ren | i_req_wen) & !hit) && wt_pending && i_mem_ready) begin
