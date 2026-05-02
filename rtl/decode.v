@@ -159,7 +159,7 @@ module decode (
   assign o_is_branch = branch;  // 3/25 UPDATE: removed '& is_branch_taken & cu_passthrough_en;'
   assign o_is_jump_or_branch = redirect_control_flow;
 
-  assign if_flush = 1'b0;
+  assign if_flush = redirect_control_flow;
 
 	next_pc_setter next_pc_setter(i_pc, !icache_busy, !dcache_busy, instr_buffer_empty, instr_buffer_full, 
 	  opcode, is_branch_taken, jump, register_jump_target, immediate_jump_target, o_next_pc);
