@@ -96,23 +96,11 @@ module cache (
     reg [DEPTH - 1:0] valid1;
     reg [DEPTH - 1:0] valid2;
     reg [DEPTH - 1:0] valid3;
-    // True LRU: 2-bit age counter per way per set.
-    // age==0 is MRU, age==3 is LRU (victim). All four ages in a fully-valid
-    // set are always a permutation of {0,1,2,3}. On every access the touched
-    // way is reset to 0 and every way that was younger (lower age) is
-    // incremented by 1 to preserve the strict ordering.
+
     reg [1:0] age0 [DEPTH - 1:0];
     reg [1:0] age1 [DEPTH - 1:0];
     reg [1:0] age2 [DEPTH - 1:0];
     reg [1:0] age3 [DEPTH - 1:0];
-
-    // Fill in your implementation here.
-    // MODIFIED FSM:
-    // IDLE ──(miss)──> UPDATE_CACHE_REQ ──(mem_ready)──> UPDATE_CACHE_WAIT
-    // ^                                                       │
-    // │<──────────────(last word, read miss)──────────────────┤
-    // │                                                       │
-    // │<──(mem_ready)──── WRITE_THROUGH ◄──(last word, write)─┘
 
     //decode incoming address and check for hits, current CPU request
     wire [O-1:0] offset = i_req_addr[O-1:0];
@@ -140,11 +128,15 @@ module cache (
     wire [1:0] victim_way = (age0[index] == 2'd3) ? 2'd0 :
                             (age1[index] == 2'd3) ? 2'd1 :
                             (age2[index] == 2'd3) ? 2'd2 : 2'd3;
+    wire [1:0] miss_victim_way = !valid0[index] ? 2'd0 :
+                                  !valid1[index] ? 2'd1 :
+                                  !valid2[index] ? 2'd2 :
+                                  !valid3[index] ? 2'd3 :
+                                                    victim_way;
 
     reg [2:0] state, next_state;
     localparam IDLE = 3'd0;
     localparam REFILL = 3'd1;
-    localparam WRITE_THROUGH = 3'd3;
     localparam [1:0] LAST_REFILL_WORD = D - 1;
 
     //original request address
@@ -181,9 +173,8 @@ module cache (
     reg        mem_ren;
     //write enable
     reg        mem_wen;
-    //data for write though
+    //data for memory writes
     reg [31:0] mem_wdata;
-    //pending write-through queue for write hits when memory is not ready
     reg        wt_pending;
     reg [31:0] wt_addr;
     reg [31:0] wt_wdata;
@@ -193,14 +184,10 @@ module cache (
     //drive the memory port combinationally so the cache can
     // stream requests out as soon as the memory accepts them.
     wire refill_mem_ren = (state == REFILL) && (refill_sent_count < 3'd4) && i_mem_ready;
-    wire write_through_mem_wen = (state == WRITE_THROUGH) && i_mem_ready;
-
-    assign o_mem_addr = (state == REFILL) ? refill_addr :
-                        (state == WRITE_THROUGH) ? req_addr :
-                        mem_addr;
+    assign o_mem_addr = (state == REFILL) ? refill_addr : mem_addr;
     assign o_mem_ren = (state == REFILL) ? refill_mem_ren : mem_ren;
-    assign o_mem_wen = (state == WRITE_THROUGH) ? write_through_mem_wen : mem_wen;
-    assign o_mem_wdata = (state == WRITE_THROUGH) ? req_wdata : mem_wdata;
+    assign o_mem_wen = mem_wen;
+    assign o_mem_wdata = mem_wdata;
     assign o_res_rdata = (state == IDLE && i_req_ren && hit) ? hit_word : res_rdata;
 
     wire [31:0] merged_hit_word = {
@@ -289,20 +276,8 @@ module cache (
             end
             REFILL: begin
                 case (refill_resp_last)
-                    1'b1: begin
-                        case (is_write)
-                            1'b1: next_state = WRITE_THROUGH;
-                            default: next_state = IDLE;
-                        endcase
-                    end
-                    default: next_state = REFILL;
-                endcase
-            end
-            //write to memory
-            WRITE_THROUGH: begin
-                case (i_mem_ready)
                     1'b1: next_state = IDLE;
-                    default: next_state = WRITE_THROUGH;
+                    default: next_state = REFILL;
                 endcase
             end
             default: begin
@@ -311,7 +286,9 @@ module cache (
         endcase
     end
 
-    assign o_busy = (state != IDLE) | ((i_req_ren | i_req_wen) & !hit);
+    assign o_busy = (state != IDLE) |
+                    ((i_req_ren | i_req_wen) & !hit) |
+                    (i_req_wen & hit & wt_pending & ~i_mem_ready);
 
     //sequential logic
     always @(posedge i_clk) begin
@@ -371,16 +348,7 @@ module cache (
                         req_mask <= i_req_mask;
 
                         //use invalid way first, otherwise true LRU victim (age==3)
-                        if (!valid0[index])
-                            victim <= 2'd0;
-                        else if (!valid1[index])
-                            victim <= 2'd1;
-                        else if (!valid2[index])
-                            victim <= 2'd2;
-                        else if (!valid3[index])
-                            victim <= 2'd3;
-                        else
-                            victim <= victim_way;
+                        victim <= miss_victim_way;
 
                         refill_sent_word <= 2'b00;
                         refill_recv_word <= 2'b00;
@@ -425,35 +393,28 @@ module cache (
                             default: ;
                         endcase
 
-                        //if memory is busy, queue one pending write.
                         if (wt_pending) begin
                             if (i_mem_ready) begin
                                 mem_wen <= 1'b1;
                                 mem_addr <= wt_addr;
                                 mem_wdata <= wt_wdata;
-                                wt_pending <= 1'b1;
                                 wt_addr <= i_req_addr;
                                 wt_wdata <= merged_hit_word;
                             end
-                        end else begin
-                            if (i_mem_ready) begin
-                                mem_wen <= 1'b1;
-                                mem_addr <= i_req_addr;
-                                mem_wdata <= merged_hit_word;
-                            end else begin
-                                wt_pending <= 1'b1;
-                                wt_addr <= i_req_addr;
-                                wt_wdata <= merged_hit_word;
-                            end
-                        end
-                    end else begin
-                        //consume pending write-through when memory can accept it.
-                        if (!((i_req_ren | i_req_wen) & !hit) && wt_pending && i_mem_ready) begin
+                        end else if (i_mem_ready) begin
                             mem_wen <= 1'b1;
-                            mem_addr <= wt_addr;
-                            mem_wdata <= wt_wdata;
-                            wt_pending <= 1'b0;
+                            mem_addr <= i_req_addr;
+                            mem_wdata <= merged_hit_word;
+                        end else begin
+                            wt_pending <= 1'b1;
+                            wt_addr <= i_req_addr;
+                            wt_wdata <= merged_hit_word;
                         end
+                    end else if (wt_pending && i_mem_ready) begin
+                        mem_wen <= 1'b1;
+                        mem_addr <= wt_addr;
+                        mem_wdata <= wt_wdata;
+                        wt_pending <= 1'b0;
                     end
                 end
 
@@ -508,6 +469,23 @@ module cache (
                                     default: ;
                                 endcase
                                 req_wdata <= merged_refill_word;
+                                if (wt_pending) begin
+                                    if (i_mem_ready) begin
+                                        mem_wen <= 1'b1;
+                                        mem_addr <= wt_addr;
+                                        mem_wdata <= wt_wdata;
+                                        wt_addr <= req_addr;
+                                        wt_wdata <= merged_refill_word;
+                                    end
+                                end else if (i_mem_ready) begin
+                                    mem_wen <= 1'b1;
+                                    mem_addr <= req_addr;
+                                    mem_wdata <= merged_refill_word;
+                                end else begin
+                                    wt_pending <= 1'b1;
+                                    wt_addr <= req_addr;
+                                    wt_wdata <= merged_refill_word;
+                                end
                             end
                         end
 
@@ -515,10 +493,6 @@ module cache (
                     end
                 end
 
-                WRITE_THROUGH: begin
-                    mem_addr <= req_addr;
-                    mem_wdata <= req_wdata;
-                end
                 default: begin
                 end
             endcase
