@@ -71,25 +71,43 @@ module cache (
     // rather than using the localparams is also permitted, as long as the
     // same values are used (and consistent with the project specification).
     //
-    // 64 ways * 16 bytes per way = 1K cache
+    // 16 sets * 4 ways per set * 16 bytes per way = 1K cache
     localparam O = 4;            // 4 bit offset => 16 byte cache line
-    localparam W = 64;           // 64 way fully associative, true LRU
-    localparam T = 32 - O;       // 28 bit tag
+    localparam S = 4;            // 4 bit set index => 16 sets
+    localparam DEPTH = 16;       // 16 sets
+    localparam W = 4;            // 4 way set associative, true LRU
+    localparam T = 32 - O - S;   // 24 bit tag
     localparam integer D = 4;    // 16 bytes per line / 4 bytes per word = 4 words per line
-    localparam WBITS = 6;        // log2(64) = 6
 
     // The following memory arrays model the cache structure. As this is
     // an internal implementation detail, you are *free* to modify these
     // arrays as you please.
 
-    // Backing memory, modeled as 64 fully associative ways.
-    reg [   31:0] datas [W - 1:0][D - 1:0];
-    reg [T - 1:0] tags  [W - 1:0];
-    reg            valid [W - 1:0];
-    reg [WBITS-1:0] lru [W - 1:0];
+    // Backing memory, modeled as four separate ways.
+    reg [   31:0] datas0 [DEPTH - 1:0][D - 1:0];
+    reg [   31:0] datas1 [DEPTH - 1:0][D - 1:0];
+    reg [   31:0] datas2 [DEPTH - 1:0][D - 1:0];
+    reg [   31:0] datas3 [DEPTH - 1:0][D - 1:0];
+    reg [T - 1:0] tags0  [DEPTH - 1:0];
+    reg [T - 1:0] tags1  [DEPTH - 1:0];
+    reg [T - 1:0] tags2  [DEPTH - 1:0];
+    reg [T - 1:0] tags3  [DEPTH - 1:0];
+    reg [DEPTH - 1:0] valid0;
+    reg [DEPTH - 1:0] valid1;
+    reg [DEPTH - 1:0] valid2;
+    reg [DEPTH - 1:0] valid3;
+    // True LRU: 2-bit age counter per way per set.
+    // age==0 is MRU, age==3 is LRU (victim). All four ages in a fully-valid
+    // set are always a permutation of {0,1,2,3}. On every access the touched
+    // way is reset to 0 and every way that was younger (lower age) is
+    // incremented by 1 to preserve the strict ordering.
+    reg [1:0] age0 [DEPTH - 1:0];
+    reg [1:0] age1 [DEPTH - 1:0];
+    reg [1:0] age2 [DEPTH - 1:0];
+    reg [1:0] age3 [DEPTH - 1:0];
 
     // Fill in your implementation here.
-    // MODIFIED FSM: 
+    // MODIFIED FSM:
     // IDLE ──(miss)──> UPDATE_CACHE_REQ ──(mem_ready)──> UPDATE_CACHE_WAIT
     // ^                                                       │
     // │<──────────────(last word, read miss)──────────────────┤
@@ -98,60 +116,30 @@ module cache (
 
     //decode incoming address and check for hits, current CPU request
     wire [O-1:0] offset = i_req_addr[O-1:0];
-    wire [T-1:0] tag    = i_req_addr[31:O];
+    wire [S-1:0] index  = i_req_addr[O+S-1:O];
+    wire [T-1:0] tag    = i_req_addr[31:O+S];
 
-    wire hit0;
-    wire hit1;
-    wire [31:0] word0;
-    wire [31:0] word1;
+    wire hit0 = valid0[index] && (tags0[index] == tag);
+    wire hit1 = valid1[index] && (tags1[index] == tag);
+    wire hit2 = valid2[index] && (tags2[index] == tag);
+    wire hit3 = valid3[index] && (tags3[index] == tag);
+    wire hit  = hit0 | hit1 | hit2 | hit3;
 
-    wire            hit_vec  [W - 1:0];
-    wire [31:0]     data_vec [W - 1:0];
-    wire [W - 1:0]  hit_bits;
+    wire [31:0] word0 = datas0[index][offset[3:2]];
+    wire [31:0] word1 = datas1[index][offset[3:2]];
+    wire [31:0] word2 = datas2[index][offset[3:2]];
+    wire [31:0] word3 = datas3[index][offset[3:2]];
 
-    genvar g;
-    generate
-        for (g = 0; g < W; g = g + 1) begin : gen_hit
-            assign hit_vec[g] = valid[g] && (tags[g] == tag);
-            assign data_vec[g] = datas[g][offset[3:2]];
-            assign hit_bits[g] = hit_vec[g];
-        end
-    endgenerate
+    wire [31:0] hit_word = hit0 ? word0 :
+                           hit1 ? word1 :
+                           hit2 ? word2 : word3;
+    wire [1:0]  hit_way  = hit0 ? 2'd0 :
+                           hit1 ? 2'd1 :
+                           hit2 ? 2'd2 : 2'd3;
 
-    wire hit = |hit_bits;
-
-    wire [WBITS - 1:0] hit_way_chain [W - 1:0];
-    wire [WBITS - 1:0] hit_way;
-    assign hit_way_chain[0] = {WBITS{1'b0}};
-    generate
-        for (g = 1; g < W; g = g + 1) begin : gen_hit_way
-            assign hit_way_chain[g] = hit_vec[g] ? g[WBITS - 1:0] :
-                                      hit_way_chain[g - 1];
-        end
-    endgenerate
-    assign hit_way = hit_way_chain[W - 1];
-
-    wire [31:0] hit_masked [W - 1:0];
-    generate
-        for (g = 0; g < W; g = g + 1) begin : gen_mask
-            assign hit_masked[g] = {32{hit_vec[g]}} & data_vec[g];
-        end
-    endgenerate
-
-    wire [31:0] hit_data_chain [W - 1:0];
-    wire [31:0] hit_data;
-    assign hit_data_chain[0] = hit_masked[0];
-    generate
-        for (g = 1; g < W; g = g + 1) begin : gen_hit_data
-            assign hit_data_chain[g] = hit_data_chain[g - 1] | hit_masked[g];
-        end
-    endgenerate
-    assign hit_data = hit_data_chain[W - 1];
-
-    assign hit0 = hit;
-    assign hit1 = 1'b0;
-    assign word0 = hit_data;
-    assign word1 = 32'b0;
+    wire [1:0] victim_way = (age0[index] == 2'd3) ? 2'd0 :
+                            (age1[index] == 2'd3) ? 2'd1 :
+                            (age2[index] == 2'd3) ? 2'd2 : 2'd3;
 
     reg [2:0] state, next_state;
     localparam IDLE = 3'd0;
@@ -167,7 +155,8 @@ module cache (
     reg [31:0] req_wdata;
     //byte mask for write
     reg [3:0]  req_mask;
-    reg [WBITS - 1:0] victim;
+    // 2-bit victim way index
+    reg [1:0] victim;
     //purpose of all this tracking is the 4 words per line thing
     //tracks which word address to send next during a miss refill
     reg [1:0]  refill_sent_word;
@@ -178,53 +167,13 @@ module cache (
     reg [31:0] refill_req_word;
 
     //for handling a miss, need to save the request address and data for the refill and write-through phases
-    wire [T-1:0] req_tag    = req_addr[31:O];
+    wire [S-1:0] req_index  = req_addr[O+S-1:O];
+    wire [T-1:0] req_tag    = req_addr[31:O+S];
     wire [1:0]   req_word   = req_addr[3:2];
     //base address of the line being refilled
     wire [31:0] req_base_addr = {req_addr[31:O], {O{1'b0}}};
     //memory of current word getting fetched
     wire [31:0] refill_addr = req_base_addr + {28'b0, refill_sent_word, 2'b00};
-
-    //does there exist invalid lines
-    wire [W-1:0] inv;
-    wire has_invalid;
-    assign has_invalid = |inv;
-    wire [WBITS-1:0] invalid_way_chain [W - 1:0];
-    wire [WBITS-1:0] invalid_way;
-
-    wire [WBITS-1:0] lru_candidate [W-1:0];
-    wire [WBITS-1:0] age [W-1:0];
-    wire [WBITS-1:0] lru_way;
-    wire [WBITS-1:0] victim_way;
-
-    generate
-        for (g = 0; g < W; g = g + 1) begin : gen_inv
-            assign inv[g] = ~valid[g];
-        end
-    endgenerate
-
-    assign invalid_way_chain[0] = {WBITS{1'b0}};
-    generate
-        for (g = 1; g < W; g = g + 1) begin : gen_invalid_way
-            assign invalid_way_chain[g] = inv[g] ? g[WBITS - 1:0] :
-                                          invalid_way_chain[g - 1];
-        end
-    endgenerate
-    assign invalid_way = invalid_way_chain[W - 1];
-
-    assign lru_candidate[0] = {WBITS{1'b0}};
-    assign age[0] = lru[0];
-    generate
-        for (g = 1; g < W; g = g + 1) begin : gen_max_age
-            assign lru_candidate[g] = (lru[g] > age[g - 1]) ? g[WBITS - 1:0] :
-                                      lru_candidate[g - 1];
-            assign age[g] = (lru[g] > age[g - 1]) ? lru[g] :
-                                      age[g - 1];
-        end
-    endgenerate
-
-    assign lru_way = lru_candidate[W - 1];
-    assign victim_way = has_invalid ? invalid_way : lru_way;
 
     //address sent to memory
     reg [31:0] mem_addr;
@@ -252,9 +201,8 @@ module cache (
     assign o_mem_ren = (state == REFILL) ? refill_mem_ren : mem_ren;
     assign o_mem_wen = (state == WRITE_THROUGH) ? write_through_mem_wen : mem_wen;
     assign o_mem_wdata = (state == WRITE_THROUGH) ? req_wdata : mem_wdata;
-    assign o_res_rdata = (state == IDLE && i_req_ren && hit) ? (hit0 ? word0 : word1) : res_rdata;
+    assign o_res_rdata = (state == IDLE && i_req_ren && hit) ? hit_word : res_rdata;
 
-    wire [31:0] hit_word = hit0 ? word0 : word1;
     wire [31:0] merged_hit_word = {
         i_req_mask[3] ? i_req_wdata[31:24] : hit_word[31:24],
         i_req_mask[2] ? i_req_wdata[23:16] : hit_word[23:16],
@@ -276,45 +224,66 @@ module cache (
     //received last word of the cache line being refilled
     wire refill_resp_last = refill_resp_fire && (refill_recv_word == LAST_REFILL_WORD);
 
-    generate
-        for (g = 0; g < W; g = g + 1) begin : gen_way_reg
-            always @(posedge i_clk) begin
-                if (i_rst) begin
-                    valid[g] <= 1'b0;
-                    lru[g] <= g[WBITS - 1:0];
-                end else begin
-                    if ((state == IDLE) && i_req_wen && hit && (g[WBITS - 1:0] == hit_way))
-                        datas[g][offset[3:2]] <= merged_hit_word;
-                    if ((state == REFILL) && refill_resp_fire && (g[WBITS - 1:0] == victim)) begin
-                        datas[g][refill_recv_word] <=
-                            (refill_resp_last && is_write && (req_word == refill_recv_word)) ?
-                            merged_refill_word : i_mem_rdata;
-                        if (refill_resp_last && is_write && (req_word != refill_recv_word))
-                            datas[g][req_word] <= merged_refill_word;
-                    end
-                    if ((state == REFILL) && refill_resp_last && (g[WBITS - 1:0] == victim)) begin
-                        tags[g] <= req_tag;
-                        valid[g] <= 1'b1;
-                    end
-                    if (((state == IDLE) && ((i_req_ren | i_req_wen) & hit)) ||
-                        ((state == REFILL) && refill_resp_last)) begin
-                        lru[g] <= (((state == IDLE) && (g[WBITS - 1:0] == hit_way)) ||
-                                   ((state == REFILL) && (g[WBITS - 1:0] == victim))) ? {WBITS{1'b0}} :
-                                  (valid[g] ? (lru[g] + {{(WBITS - 1){1'b0}}, 1'b1}) : lru[g]);
-                    end
-                end
-            end
-        end
-    endgenerate
+    wire [1:0] idx_cur0 = age0[index];
+    wire [1:0] idx_cur1 = age1[index];
+    wire [1:0] idx_cur2 = age2[index];
+    wire [1:0] idx_cur3 = age3[index];
+
+    // next ages when way 0 is touched on set index
+    wire [1:0] idx_nxt0_w0 = 2'd0;
+    wire [1:0] idx_nxt1_w0 = (idx_cur1 < idx_cur0) ? idx_cur1 + 2'd1 : idx_cur1;
+    wire [1:0] idx_nxt2_w0 = (idx_cur2 < idx_cur0) ? idx_cur2 + 2'd1 : idx_cur2;
+    wire [1:0] idx_nxt3_w0 = (idx_cur3 < idx_cur0) ? idx_cur3 + 2'd1 : idx_cur3;
+    // next ages when way 1 is touched on set index
+    wire [1:0] idx_nxt0_w1 = (idx_cur0 < idx_cur1) ? idx_cur0 + 2'd1 : idx_cur0;
+    wire [1:0] idx_nxt1_w1 = 2'd0;
+    wire [1:0] idx_nxt2_w1 = (idx_cur2 < idx_cur1) ? idx_cur2 + 2'd1 : idx_cur2;
+    wire [1:0] idx_nxt3_w1 = (idx_cur3 < idx_cur1) ? idx_cur3 + 2'd1 : idx_cur3;
+    // next ages when way 2 is touched on set index
+    wire [1:0] idx_nxt0_w2 = (idx_cur0 < idx_cur2) ? idx_cur0 + 2'd1 : idx_cur0;
+    wire [1:0] idx_nxt1_w2 = (idx_cur1 < idx_cur2) ? idx_cur1 + 2'd1 : idx_cur1;
+    wire [1:0] idx_nxt2_w2 = 2'd0;
+    wire [1:0] idx_nxt3_w2 = (idx_cur3 < idx_cur2) ? idx_cur3 + 2'd1 : idx_cur3;
+    // next ages when way 3 is touched on set index
+    wire [1:0] idx_nxt0_w3 = (idx_cur0 < idx_cur3) ? idx_cur0 + 2'd1 : idx_cur0;
+    wire [1:0] idx_nxt1_w3 = (idx_cur1 < idx_cur3) ? idx_cur1 + 2'd1 : idx_cur1;
+    wire [1:0] idx_nxt2_w3 = (idx_cur2 < idx_cur3) ? idx_cur2 + 2'd1 : idx_cur2;
+    wire [1:0] idx_nxt3_w3 = 2'd0;
+
+    // Parallel next-age wires for req_index (used at refill completion)
+    wire [1:0] req_cur0 = age0[req_index];
+    wire [1:0] req_cur1 = age1[req_index];
+    wire [1:0] req_cur2 = age2[req_index];
+    wire [1:0] req_cur3 = age3[req_index];
+
+    // next ages when way 0 is touched on set req_index
+    wire [1:0] req_nxt0_w0 = 2'd0;
+    wire [1:0] req_nxt1_w0 = (req_cur1 < req_cur0) ? req_cur1 + 2'd1 : req_cur1;
+    wire [1:0] req_nxt2_w0 = (req_cur2 < req_cur0) ? req_cur2 + 2'd1 : req_cur2;
+    wire [1:0] req_nxt3_w0 = (req_cur3 < req_cur0) ? req_cur3 + 2'd1 : req_cur3;
+    // next ages when way 1 is touched on set req_index
+    wire [1:0] req_nxt0_w1 = (req_cur0 < req_cur1) ? req_cur0 + 2'd1 : req_cur0;
+    wire [1:0] req_nxt1_w1 = 2'd0;
+    wire [1:0] req_nxt2_w1 = (req_cur2 < req_cur1) ? req_cur2 + 2'd1 : req_cur2;
+    wire [1:0] req_nxt3_w1 = (req_cur3 < req_cur1) ? req_cur3 + 2'd1 : req_cur3;
+    // next ages when way 2 is touched on set req_index
+    wire [1:0] req_nxt0_w2 = (req_cur0 < req_cur2) ? req_cur0 + 2'd1 : req_cur0;
+    wire [1:0] req_nxt1_w2 = (req_cur1 < req_cur2) ? req_cur1 + 2'd1 : req_cur1;
+    wire [1:0] req_nxt2_w2 = 2'd0;
+    wire [1:0] req_nxt3_w2 = (req_cur3 < req_cur2) ? req_cur3 + 2'd1 : req_cur3;
+    // next ages when way 3 is touched on set req_index
+    wire [1:0] req_nxt0_w3 = (req_cur0 < req_cur3) ? req_cur0 + 2'd1 : req_cur0;
+    wire [1:0] req_nxt1_w3 = (req_cur1 < req_cur3) ? req_cur1 + 2'd1 : req_cur1;
+    wire [1:0] req_nxt2_w3 = (req_cur2 < req_cur3) ? req_cur2 + 2'd1 : req_cur2;
+    wire [1:0] req_nxt3_w3 = 2'd0;
 
     //next state logic, combinational
     always @* begin
         next_state = state;
         case (state)
             IDLE: begin
-                casez ({((i_req_ren | i_req_wen) & !hit), (i_req_wen & hit)})
-                    2'b10: next_state = REFILL;
-                    2'b01: next_state = WRITE_THROUGH;
+                case (((i_req_ren | i_req_wen) & !hit))
+                    1'b1: next_state = REFILL;
                     default: next_state = IDLE;
                 endcase
             end
@@ -342,8 +311,7 @@ module cache (
         endcase
     end
 
-    wire write_hit_blocked = (state == IDLE) && i_req_wen && hit && wt_pending && !i_mem_ready;
-    assign o_busy = (state != IDLE) | ((i_req_ren | i_req_wen) & !hit) | write_hit_blocked;
+    assign o_busy = (state != IDLE) | ((i_req_ren | i_req_wen) & !hit);
 
     //sequential logic
     always @(posedge i_clk) begin
@@ -360,12 +328,34 @@ module cache (
             is_write <= 1'b0;
             req_wdata <= 32'b0;
             req_mask <= 4'b0;
-            victim <= 1'b0;
+            victim <= 2'b00;
             refill_sent_word <= 2'b00;
             refill_recv_word <= 2'b00;
             refill_sent_count <= 3'b000;
             refill_req_word <= 32'b0;
             res_rdata <= 32'b0;
+
+            valid0 <= {DEPTH{1'b0}};
+            valid1 <= {DEPTH{1'b0}};
+            valid2 <= {DEPTH{1'b0}};
+            valid3 <= {DEPTH{1'b0}};
+            // initialise ages so way 0 is MRU, way 3 is LRU
+            age0[0] <= 2'd0; age1[0] <= 2'd1; age2[0] <= 2'd2; age3[0] <= 2'd3;
+            age0[1] <= 2'd0; age1[1] <= 2'd1; age2[1] <= 2'd2; age3[1] <= 2'd3;
+            age0[2] <= 2'd0; age1[2] <= 2'd1; age2[2] <= 2'd2; age3[2] <= 2'd3;
+            age0[3] <= 2'd0; age1[3] <= 2'd1; age2[3] <= 2'd2; age3[3] <= 2'd3;
+            age0[4] <= 2'd0; age1[4] <= 2'd1; age2[4] <= 2'd2; age3[4] <= 2'd3;
+            age0[5] <= 2'd0; age1[5] <= 2'd1; age2[5] <= 2'd2; age3[5] <= 2'd3;
+            age0[6] <= 2'd0; age1[6] <= 2'd1; age2[6] <= 2'd2; age3[6] <= 2'd3;
+            age0[7] <= 2'd0; age1[7] <= 2'd1; age2[7] <= 2'd2; age3[7] <= 2'd3;
+            age0[8] <= 2'd0; age1[8] <= 2'd1; age2[8] <= 2'd2; age3[8] <= 2'd3;
+            age0[9] <= 2'd0; age1[9] <= 2'd1; age2[9] <= 2'd2; age3[9] <= 2'd3;
+            age0[10] <= 2'd0; age1[10] <= 2'd1; age2[10] <= 2'd2; age3[10] <= 2'd3;
+            age0[11] <= 2'd0; age1[11] <= 2'd1; age2[11] <= 2'd2; age3[11] <= 2'd3;
+            age0[12] <= 2'd0; age1[12] <= 2'd1; age2[12] <= 2'd2; age3[12] <= 2'd3;
+            age0[13] <= 2'd0; age1[13] <= 2'd1; age2[13] <= 2'd2; age3[13] <= 2'd3;
+            age0[14] <= 2'd0; age1[14] <= 2'd1; age2[14] <= 2'd2; age3[14] <= 2'd3;
+            age0[15] <= 2'd0; age1[15] <= 2'd1; age2[15] <= 2'd2; age3[15] <= 2'd3;
 
         end else begin
             state <= next_state;
@@ -380,8 +370,17 @@ module cache (
                         req_wdata <= i_req_wdata;
                         req_mask <= i_req_mask;
 
-                        //use invalid way first, otherwise true LRU
-                        victim <= victim_way;
+                        //use invalid way first, otherwise true LRU victim (age==3)
+                        if (!valid0[index])
+                            victim <= 2'd0;
+                        else if (!valid1[index])
+                            victim <= 2'd1;
+                        else if (!valid2[index])
+                            victim <= 2'd2;
+                        else if (!valid3[index])
+                            victim <= 2'd3;
+                        else
+                            victim <= victim_way;
 
                         refill_sent_word <= 2'b00;
                         refill_recv_word <= 2'b00;
@@ -391,8 +390,15 @@ module cache (
 
                     //read hit
                     if (i_req_ren & hit) begin
-                        res_rdata <= hit0 ? word0 : word1;
-                        // update LRU
+                        res_rdata <= hit_word;
+                        // update true LRU ages for the hit way on set index
+                        case (hit_way)
+                            2'd0: begin age0[index] <= idx_nxt0_w0; age1[index] <= idx_nxt1_w0; age2[index] <= idx_nxt2_w0; age3[index] <= idx_nxt3_w0; end
+                            2'd1: begin age0[index] <= idx_nxt0_w1; age1[index] <= idx_nxt1_w1; age2[index] <= idx_nxt2_w1; age3[index] <= idx_nxt3_w1; end
+                            2'd2: begin age0[index] <= idx_nxt0_w2; age1[index] <= idx_nxt1_w2; age2[index] <= idx_nxt2_w2; age3[index] <= idx_nxt3_w2; end
+                            2'd3: begin age0[index] <= idx_nxt0_w3; age1[index] <= idx_nxt1_w3; age2[index] <= idx_nxt2_w3; age3[index] <= idx_nxt3_w3; end
+                            default: ;
+                        endcase
                     end
 
                     //write hit
@@ -401,6 +407,45 @@ module cache (
                         is_write <= 1'b1;
                         req_wdata <= merged_hit_word;
                         req_mask <= i_req_mask;
+
+                        case (hit_way)
+                            2'd0: datas0[index][offset[3:2]] <= merged_hit_word;
+                            2'd1: datas1[index][offset[3:2]] <= merged_hit_word;
+                            2'd2: datas2[index][offset[3:2]] <= merged_hit_word;
+                            2'd3: datas3[index][offset[3:2]] <= merged_hit_word;
+                            default: ;
+                        endcase
+
+                        // update true LRU ages for the hit way on set index
+                        case (hit_way)
+                            2'd0: begin age0[index] <= idx_nxt0_w0; age1[index] <= idx_nxt1_w0; age2[index] <= idx_nxt2_w0; age3[index] <= idx_nxt3_w0; end
+                            2'd1: begin age0[index] <= idx_nxt0_w1; age1[index] <= idx_nxt1_w1; age2[index] <= idx_nxt2_w1; age3[index] <= idx_nxt3_w1; end
+                            2'd2: begin age0[index] <= idx_nxt0_w2; age1[index] <= idx_nxt1_w2; age2[index] <= idx_nxt2_w2; age3[index] <= idx_nxt3_w2; end
+                            2'd3: begin age0[index] <= idx_nxt0_w3; age1[index] <= idx_nxt1_w3; age2[index] <= idx_nxt2_w3; age3[index] <= idx_nxt3_w3; end
+                            default: ;
+                        endcase
+
+                        //if memory is busy, queue one pending write.
+                        if (wt_pending) begin
+                            if (i_mem_ready) begin
+                                mem_wen <= 1'b1;
+                                mem_addr <= wt_addr;
+                                mem_wdata <= wt_wdata;
+                                wt_pending <= 1'b1;
+                                wt_addr <= i_req_addr;
+                                wt_wdata <= merged_hit_word;
+                            end
+                        end else begin
+                            if (i_mem_ready) begin
+                                mem_wen <= 1'b1;
+                                mem_addr <= i_req_addr;
+                                mem_wdata <= merged_hit_word;
+                            end else begin
+                                wt_pending <= 1'b1;
+                                wt_addr <= i_req_addr;
+                                wt_wdata <= merged_hit_word;
+                            end
+                        end
                     end else begin
                         //consume pending write-through when memory can accept it.
                         if (!((i_req_ren | i_req_wen) & !hit) && wt_pending && i_mem_ready) begin
@@ -421,18 +466,47 @@ module cache (
 
                     if (refill_resp_fire) begin
                         //write each returning word into the victim way as it arrives
+                        case (victim)
+                            2'd0: datas0[req_index][refill_recv_word] <= i_mem_rdata;
+                            2'd1: datas1[req_index][refill_recv_word] <= i_mem_rdata;
+                            2'd2: datas2[req_index][refill_recv_word] <= i_mem_rdata;
+                            2'd3: datas3[req_index][refill_recv_word] <= i_mem_rdata;
+                            default: ;
+                        endcase
+
                         //save the specific word we originally requested so we can return it to the CPU once the refill is done.
                         if (refill_recv_word == req_word)
                             refill_req_word <= i_mem_rdata;
 
                         if (refill_resp_last) begin
                             //mark the line valid only after all words have arrived
-                            //other way is now LRU
-                            //case of a read miss so return requested word 
+                            case (victim)
+                                2'd0: begin tags0[req_index] <= req_tag; valid0[req_index] <= 1'b1; end
+                                2'd1: begin tags1[req_index] <= req_tag; valid1[req_index] <= 1'b1; end
+                                2'd2: begin tags2[req_index] <= req_tag; valid2[req_index] <= 1'b1; end
+                                2'd3: begin tags3[req_index] <= req_tag; valid3[req_index] <= 1'b1; end
+                                default: ;
+                            endcase
+                            //newly filled way is now MRU; update true LRU ages on req_index
+                            case (victim)
+                                2'd0: begin age0[req_index] <= req_nxt0_w0; age1[req_index] <= req_nxt1_w0; age2[req_index] <= req_nxt2_w0; age3[req_index] <= req_nxt3_w0; end
+                                2'd1: begin age0[req_index] <= req_nxt0_w1; age1[req_index] <= req_nxt1_w1; age2[req_index] <= req_nxt2_w1; age3[req_index] <= req_nxt3_w1; end
+                                2'd2: begin age0[req_index] <= req_nxt0_w2; age1[req_index] <= req_nxt1_w2; age2[req_index] <= req_nxt2_w2; age3[req_index] <= req_nxt3_w2; end
+                                2'd3: begin age0[req_index] <= req_nxt0_w3; age1[req_index] <= req_nxt1_w3; age2[req_index] <= req_nxt2_w3; age3[req_index] <= req_nxt3_w3; end
+                                default: ;
+                            endcase
+                            //case of a read miss so return requested word
                             if (!is_write) begin
                                 res_rdata <= (req_word == refill_recv_word) ? i_mem_rdata : refill_req_word;
                             //write miss, so merge whatever bytes getting stored into refilled word and write back
                             end else begin
+                                case (victim)
+                                    2'd0: datas0[req_index][req_word] <= merged_refill_word;
+                                    2'd1: datas1[req_index][req_word] <= merged_refill_word;
+                                    2'd2: datas2[req_index][req_word] <= merged_refill_word;
+                                    2'd3: datas3[req_index][req_word] <= merged_refill_word;
+                                    default: ;
+                                endcase
                                 req_wdata <= merged_refill_word;
                             end
                         end
