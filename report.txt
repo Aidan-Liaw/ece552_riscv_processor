@@ -1,0 +1,25 @@
+Prefetcher:
+We implemented a prefetch input queue for the imem using the first come first serve model as referenced here: https://en.wikipedia.org/wiki/Prefetch_input_queue. 
+Without the prefetcher, the pipeline will stall until memory is ready.
+This prefetcher has an instruction queue that holds instructions, up to 8, that memory returned if the pipeline is stalled.
+The PC queue keeps track of these memory requests so that the correct PC can be matched with the correct instruction when later returned.
+The discard counter keeps track of the memory requests that belong to the incorrect path to flush the correct number of instructions.
+If if_flush, the instruction and PC queues are cleared, and the discard counter is set to current request_count.
+The driving signals are: 
+queue_push signals to save the PC in the queue so imem can return the corresponding instruction when it does.
+queue_pop signals that the pipeline is not stalled so pop oldest instruction.
+response_to_buffer signals that memory responded but the pipeline is stalled, so put instruction in instruction queue
+response_to_output singals that memory responded and pipeline is ready so go to decode.
+For the benchmark CPI, originally it was 7.42 and this made it 6.75.
+
+Associativity (and cache):
+We increased associativity to 4 way, and hence reduced to 16 sets. It uses true LRU, which was done with a 2 bit age counter with 0 being MRU.
+When a way is accessed, its age is set to 0 and all other ways younger than the accessed way increment their age by 1.
+Instead of 2, there also now 4 data arrays, tag arrays, and valid bit vectors. 
+The FSM logic is the same as the 2 way cache, only with a modification to write through stage:
+instead of stalling the CPU and waiting for memory to write, cache attempts to write to memory at the end of REFILL and goes to IDLE, 
+and wt_pending will write it later if memory isn't ready.
+For the benchmark CPI, originally it was 6.75 and this made it 6.67.
+ 
+
+ 
