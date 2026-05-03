@@ -20,6 +20,4 @@ The FSM logic is the same as the 2 way cache, only with a modification to write 
 instead of stalling the CPU and waiting for memory to write, cache attempts to write to memory at the end of REFILL and goes to IDLE, 
 and wt_pending will write it later if memory isn't ready.
 For the benchmark CPI, originally it was 6.75 and this made it 6.67.
- 
 
- 
