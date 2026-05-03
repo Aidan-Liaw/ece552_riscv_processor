@@ -33,7 +33,8 @@ module if_id_registers #(
   // You must manually calcuate and replace these offsets and replications if so.
   parameter IMEM_INSTR_BUFFER_INTEGER_SIZE = 8,
   parameter [$clog2(IMEM_INSTR_BUFFER_INTEGER_SIZE) + 1 : 0] IMEM_INSTR_BUFFER_SIZE = IMEM_INSTR_BUFFER_INTEGER_SIZE,
-  parameter IMEM_INSTR_BUFFER_BITS = $clog2(IMEM_INSTR_BUFFER_SIZE) + 1
+  parameter IMEM_INSTR_BUFFER_BITS = $clog2(IMEM_INSTR_BUFFER_SIZE) + 1,
+  parameter RAS_ENTRIES = 32
 ) (
   input  wire        i_clk,
   input  wire        i_rst,
@@ -46,12 +47,28 @@ module if_id_registers #(
   input  wire [31:0] i_instr,
   input  wire [31:0] i_pc,
   input  wire        i_imem_valid,
+  
+  input  wire [(RAS_ENTRIES << 5) - 1 : 0] i_ras_restore_stack,
+  input  wire [$clog2(RAS_ENTRIES): 0]     i_ras_restore_ptr,
+  input  wire                              i_ras_restore_is_empty,
+    
+  input  wire        i_predict_is_taken,
+  input  wire [31:0] i_predicted_pc,
+  input  wire [31:0] i_predicted_target_pc,
 
   output wire [31:0] o_instr,
   output wire [31:0] o_pc,
   output wire        o_valid,  // 3/25 UPDATE
   output wire        o_buffer_empty,
-  output wire        o_buffer_full
+  output wire        o_buffer_full,
+  
+  output wire [(RAS_ENTRIES << 5) - 1 : 0] o_ras_restore_stack,
+  output wire [$clog2(RAS_ENTRIES): 0]     o_ras_restore_ptr,
+  output wire                              o_ras_restore_is_empty,
+  
+  output wire        o_predict_is_taken,
+  output wire [31:0] o_predicted_pc,
+  output wire [31:0] o_predicted_target_pc
 );
   
   localparam [IMEM_INSTR_BUFFER_BITS - 1:0] IMEM_BUFFER_COUNT_MAX = IMEM_INSTR_BUFFER_INTEGER_SIZE;
@@ -60,15 +77,41 @@ module if_id_registers #(
   reg [31:0] instr;
   reg [31:0] pc;
   reg        valid;  // 3/25 UPDATE: to track validity
+  
+  reg [(RAS_ENTRIES << 5) - 1 : 0] ras_restore_stack;
+  reg [$clog2(RAS_ENTRIES): 0]     ras_restore_ptr;
+  reg                              ras_restore_is_empty;
+  
+  reg        predict_is_taken;
+  reg [31:0] predicted_pc;
+  reg [31:0] predicted_target_pc;
 
   //essentially two queues to temporarily hold instructions/PCs for instructions that arrive while pipeline is stalled
   reg [31:0] instr_valid [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
   reg [31:0] pc_valid [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
+  
+  reg [(RAS_ENTRIES << 5) - 1 : 0] ras_restore_stack_valid [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
+  reg [$clog2(RAS_ENTRIES): 0]     ras_restore_ptr_valid [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
+  reg                              ras_restore_is_empty_valid [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
+  
+  reg        predict_is_taken_valid [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
+  reg [31:0] predicted_pc_valid [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
+  reg [31:0] predicted_target_pc_valid [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
+  
   reg [PTR_BITS - 1:0] pc_head;
   reg [PTR_BITS - 1:0] pc_tail;
   reg [IMEM_INSTR_BUFFER_BITS - 1:0] is_valid_and_halt_counter;
   //added queue to match returned instructions with their correct PC
   reg [31:0] request_pc [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
+  
+  reg [(RAS_ENTRIES << 5) - 1 : 0] request_ras_restore_stack [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
+  reg [$clog2(RAS_ENTRIES): 0]     request_ras_restore_ptr [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
+  reg                              request_ras_restore_is_empty [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
+  
+  reg        request_predict_is_taken [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
+  reg [31:0] request_predicted_pc [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
+  reg [31:0] request_predicted_target_pc [0:IMEM_INSTR_BUFFER_INTEGER_SIZE - 1];
+  
   reg [PTR_BITS - 1:0] request_head;
   reg [PTR_BITS - 1:0] request_tail;
   reg [IMEM_INSTR_BUFFER_BITS - 1:0] request_count;
@@ -97,8 +140,18 @@ module if_id_registers #(
   assign o_instr = instr;
   assign o_pc = pc;
   assign o_valid = valid;  // 3/25 UPDATE
+  
+  assign o_ras_restore_stack    =  ras_restore_stack;
+  assign o_ras_restore_ptr      =  ras_restore_ptr;
+  assign o_ras_restore_is_empty =  ras_restore_is_empty;
+  
+  assign o_predict_is_taken    = predict_is_taken;
+  assign o_predicted_pc        = predicted_pc;
+  assign o_predicted_target_pc = predicted_target_pc;
+  
+  
   assign o_buffer_empty = is_valid_and_halt_counter == {IMEM_INSTR_BUFFER_BITS{1'b0}};
-  assign o_buffer_full = is_valid_and_halt_counter == IMEM_BUFFER_COUNT_MAX;
+  assign o_buffer_full = (is_valid_and_halt_counter == IMEM_BUFFER_COUNT_MAX) | (request_count == IMEM_BUFFER_COUNT_MAX);
 
   // Unfortunately, there may be a situation whereby a halt and a valid instruction may occur.
   // This is particularly problematic as the data is only available
@@ -115,6 +168,12 @@ module if_id_registers #(
       instr <= NOP_INSTRUCTION;
       pc <= RESET_ADDR;
       valid <= 1'b0;
+      ras_restore_stack <= 'd0;
+      ras_restore_ptr <= 'd0;
+      ras_restore_is_empty <= 1'b1;
+      predict_is_taken <= 1'b0;
+      predicted_pc <= RESET_ADDR;
+      predicted_target_pc <= RESET_ADDR;
       pc_head <= {PTR_BITS{1'b0}};
       pc_tail <= {PTR_BITS{1'b0}};
       is_valid_and_halt_counter <= {IMEM_INSTR_BUFFER_BITS{1'b0}};
@@ -127,6 +186,12 @@ module if_id_registers #(
       instr <= NOP_INSTRUCTION;
       pc <= i_pc;
       valid <= 1'b0;
+      ras_restore_stack <= 'd0;
+      ras_restore_ptr <= 'd0;
+      ras_restore_is_empty <= 1'b1;
+      predict_is_taken <= 1'b0;
+      predicted_pc <= i_pc;
+      predicted_target_pc <= i_pc;
       pc_head <= {PTR_BITS{1'b0}};
       pc_tail <= {PTR_BITS{1'b0}};
       is_valid_and_halt_counter <= {IMEM_INSTR_BUFFER_BITS{1'b0}};
@@ -145,6 +210,12 @@ module if_id_registers #(
       //new memory request
       if (queue_push) begin
         request_pc[request_tail] <= i_pc;
+        request_ras_restore_stack[request_tail] <= i_ras_restore_stack;
+        request_ras_restore_ptr[request_tail] <= i_ras_restore_ptr;
+        request_ras_restore_is_empty[request_tail] <= i_ras_restore_is_empty;
+        request_predict_is_taken[request_tail] <= i_predict_is_taken;
+        request_predicted_pc[request_tail] <= i_predicted_pc;
+        request_predicted_target_pc[request_tail] <= i_predicted_target_pc;
         request_tail <= request_tail + 1'b1;
       end else begin
         request_tail <= request_tail;
@@ -165,6 +236,12 @@ module if_id_registers #(
       if (response_to_buffer) begin
         instr_valid[pc_tail] <= i_instr;
         pc_valid[pc_tail] <= immediate_response ? i_pc : request_pc[request_head];
+        ras_restore_stack_valid[pc_tail] <= immediate_response ? i_ras_restore_stack : request_ras_restore_stack[request_head];
+        ras_restore_ptr_valid[pc_tail] <= immediate_response ? i_ras_restore_ptr : request_ras_restore_ptr[request_head];
+        ras_restore_is_empty_valid[pc_tail] <= immediate_response ? i_ras_restore_is_empty : request_ras_restore_is_empty[request_head];
+        predict_is_taken_valid[pc_tail] <= immediate_response ? i_predict_is_taken : request_predict_is_taken[request_head];
+        predicted_pc_valid[pc_tail] <= immediate_response ? i_predicted_pc : request_predicted_pc[request_head];
+        predicted_target_pc_valid[pc_tail] <= immediate_response ? i_predicted_target_pc : request_predicted_target_pc[request_head];
         pc_tail <= pc_tail + 1'b1;
       end else begin
         pc_tail <= pc_tail;
@@ -188,28 +265,58 @@ module if_id_registers #(
           instr <= NOP_INSTRUCTION;
           pc <= pc;
           valid <= 1'b0;  // 3/25 UPDATE
+          ras_restore_stack <= ras_restore_stack;
+          ras_restore_ptr <= ras_restore_ptr;
+          ras_restore_is_empty <= ras_restore_is_empty;
+          predict_is_taken <= 1'b0;
+          predicted_pc <= predicted_pc;
+          predicted_target_pc <= predicted_target_pc;
         end
         //normal
         4'b0110 : begin
           instr <= i_instr;
           pc <= immediate_response ? i_pc : request_pc[request_head];
+          ras_restore_stack <= immediate_response ? i_ras_restore_stack : request_ras_restore_stack[request_head];
+          ras_restore_ptr <= immediate_response ? i_ras_restore_ptr : request_ras_restore_ptr[request_head];
+          ras_restore_is_empty <= immediate_response ? i_ras_restore_is_empty : request_ras_restore_is_empty[request_head];
+          predict_is_taken <= immediate_response ? i_predict_is_taken : request_predict_is_taken[request_head];
+          predicted_pc <= immediate_response ? i_predicted_pc : request_predicted_pc[request_head];
+          predicted_target_pc <= immediate_response ? i_predicted_target_pc : request_predicted_target_pc[request_head];
           valid <= 1'b1;
         end
         //pipeline not stalled, buffered instruction first
         4'b0101 : begin
           instr <= instr_valid[pc_head];
           pc <= pc_valid[pc_head];
+          ras_restore_stack <= ras_restore_stack_valid[pc_head];
+          ras_restore_ptr <= ras_restore_ptr_valid[pc_head];
+          ras_restore_is_empty <= ras_restore_is_empty_valid[pc_head];
+          predict_is_taken <= predict_is_taken_valid[pc_head];
+          predicted_pc <= predicted_pc_valid[pc_head];
+          predicted_target_pc <= predicted_target_pc_valid[pc_head];
           valid <= 1'b1;
         end
         //empty queue
         4'b0100 : begin
           instr <= NOP_INSTRUCTION;
           pc <= pc;
+          ras_restore_stack <= ras_restore_stack;
+          ras_restore_ptr <= ras_restore_ptr;
+          ras_restore_is_empty <= ras_restore_is_empty;
+          predict_is_taken <= 1'b0;
+          predicted_pc <= predicted_pc;
+          predicted_target_pc <= predicted_target_pc;
           valid <= 1'b0;
         end
         default : begin
           instr <= instr;
           pc <= pc;
+          ras_restore_stack <= ras_restore_stack;
+          ras_restore_ptr <= ras_restore_ptr;
+          ras_restore_is_empty <= ras_restore_is_empty;
+          predict_is_taken <= predict_is_taken;
+          predicted_pc <= predicted_pc;
+          predicted_target_pc <= predicted_target_pc;
           valid <= valid;
         end
       endcase

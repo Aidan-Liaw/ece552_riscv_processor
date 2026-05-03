@@ -23,20 +23,26 @@ module decode (
   input  wire [ 4:0] id_ex_rd,
   input  wire        id_ex_reg_write,
   input  wire        id_ex_mem_read,
+  
   input  wire [ 4:0] ex_mem_rd,
   input  wire        ex_mem_mem_read,
   input  wire        ex_mem_mem_write,
   input  wire        ex_mem_reg_write,
+  
   input  wire [ 4:0] mem_wb_rd,
   input  wire        mem_wb_reg_write,
+  
   input  wire [31:0] writeback_data,
   
+  input  wire        is_jump_or_branch_taken_prediction,
+  input  wire [31:0] predicted_pc,
   input  wire        keep_halting,
 
   output wire [31:0] o_next_pc,
-  output wire        o_is_jump,
-  output wire        o_is_branch,
-  output wire        o_is_jump_or_branch,
+  output wire        o_is_jump_instr,
+  output wire        o_is_branch_instr,
+  output wire        o_is_jump_or_branch_taken,
+  output wire        o_branch_recovery_needed,
   
   // Register data
   output wire [31:0] rs1_data,
@@ -86,8 +92,8 @@ module decode (
   
   //// Control Unit wires 
   // Fetch/Flow control
-  wire branch; // 0 for non-branch instructions, 1 for branch instructions
-  wire jump; // 0 for non-jump instructions, 1 for jump instructions
+  wire is_branch_instr; // 0 for non-branch instructions, 1 for branch instructions
+  wire is_jump_instr; // 0 for non-jump instructions, 1 for jump instructions
 
   wire cu_if_flush;
   	
@@ -102,8 +108,8 @@ module decode (
     .i_valid(i_valid),
     
     // IF Signals
-    .branch(branch),
-    .jump(jump),
+    .branch(is_branch_instr),
+    .jump(is_jump_instr),
     
     // EX Signals
     .imm_format(imm_format),
@@ -141,19 +147,22 @@ module decode (
 	// TODO:
 	wire [31:0] rs1_branch = id_forward_sel[0] ? id_forward_data_rs1 : rs1_data;
 
-    wire [31:0] rs2_branch = id_forward_sel[1] ? id_forward_data_rs2 : rs2_data;
-	branch_condition_checker branch_condition_checker(i_rst, branch, funct3, rs1_branch, rs2_branch, is_branch_taken);
+  wire [31:0] rs2_branch = id_forward_sel[1] ? id_forward_data_rs2 : rs2_data;
+	branch_condition_checker branch_condition_checker(i_rst, is_branch_instr, funct3, rs1_branch, rs2_branch, is_branch_taken);
 	
   // only trigger a jump if the branch is taken and the pipeline is not stalled
-  assign o_is_jump = jump;  // 3/25 UPDATE: removed '& cu_passthrough_en;'
-  assign o_is_branch = branch;  // 3/25 UPDATE: removed '& is_branch_taken & cu_passthrough_en;'
-  assign o_is_jump_or_branch = ((branch & is_branch_taken) | jump) & cu_passthrough_en;
+  assign o_is_jump_instr = is_jump_instr;  // 3/25 UPDATE: removed '& cu_passthrough_en;'
+  assign o_is_branch_instr = is_branch_instr;  // 3/25 UPDATE: removed '& is_branch_taken & cu_passthrough_en;'
+  assign o_is_jump_or_branch_taken = ((is_branch_instr & is_branch_taken) | is_jump_instr) & cu_passthrough_en;
 
   // safely combine the cu flush with our jump flush
-  assign if_flush = cu_if_flush | o_is_jump_or_branch;
+  // Flush if the prediction does not match the result
+  assign if_flush = cu_if_flush | o_branch_recovery_needed;
+  
+  assign o_branch_recovery_needed = i_valid & cu_passthrough_en & (o_next_pc != predicted_pc);
 
 	next_pc_setter next_pc_setter(i_pc, !icache_busy, !dcache_busy, instr_buffer_empty, instr_buffer_full, 
-	  opcode, is_branch_taken, jump, register_jump_target, immediate_jump_target, o_next_pc);
+	  opcode, is_branch_taken, is_jump_instr, register_jump_target, immediate_jump_target, o_next_pc);
 	 
 	wire if_id_is_hazard_free;
 	wire pc_write_en_hazard_free;
@@ -190,7 +199,7 @@ module decode (
 	
   imm_gen ig (.instr(i_instr), .instr_format(imm_format), .immediate(imm_val));
 
-  //assign if_flush = cu_if_flush | o_is_jump_or_branch;
+  //assign if_flush = cu_if_flush | o_is_jump_or_branch_taken;
  
 	
 endmodule

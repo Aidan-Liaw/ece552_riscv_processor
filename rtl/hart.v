@@ -172,9 +172,38 @@ module hart #(
 	wire [31:0] if_pc_plus_4;
   	
   wire        pc_write_en;
-  wire        is_jump;
-  wire        is_branch;
-  wire        is_jump_or_branch;
+  wire        is_jal_instr;
+  wire        is_jalr_instr;
+  wire        is_jump_instr;
+  wire        is_branch_instr;
+  wire        is_jump_or_branch_taken;
+  
+  localparam RAS_ENTRIES = 32;
+  
+  wire [(RAS_ENTRIES << 5) - 1 : 0] i_ras_restore_stack;
+  wire [$clog2(RAS_ENTRIES): 0]     i_ras_restore_ptr;
+  wire                              i_ras_restore_is_empty;
+  
+  wire [(RAS_ENTRIES << 5) - 1 : 0] o_ras_current_stack;
+  wire [$clog2(RAS_ENTRIES): 0]     o_ras_current_ptr;
+  wire                              o_ras_current_is_empty;
+    
+  wire        if_predict_is_taken;
+  wire [31:0] if_predicted_pc;
+  wire [31:0] if_predicted_target_pc;
+  
+  wire        id_predict_is_taken;
+  wire [31:0] id_predicted_pc;
+  wire [31:0] id_predicted_target_pc;
+  
+  wire [31:0] branch_corrected_target;
+  wire [31:0] branch_jumped_branched_pc;
+  
+  wire [31:0] branch_recovery_pc;
+  wire        branch_recovery_needed;
+  
+  wire        branch_is_updated;
+  wire        branch_update_taken;
   
   wire [31:0] id_instr;  
   wire [31:0] id_pc;
@@ -243,8 +272,8 @@ module hart #(
 
   forwarding_unit forwarding_unit (
     .if_id_rs(if_id_rs),
-    .is_jump(is_jump),
-    .is_branch(is_branch),
+    .is_jump_instr(is_jump_instr),
+    .is_branch_instr(is_branch_instr),
 
     .id_ex_instr(ex_instr),
     .id_ex_pc(ex_pc),
@@ -332,22 +361,56 @@ module hart #(
   wire ifetch_miss_resp = icache_busy_q & ~icache_busy;
   wire ifetch_resp_valid = ifetch_hit_resp | ifetch_miss_resp;
   wire ifetch_queue_ready = (~icache_busy) | ((~icache_busy_q) & icache_busy);
+  
+  wire id_valid; // 3/25 UPDATE
+  wire if_id_buffer_full;
+  wire if_id_buffer_empty;  
+  
+  wire        cu_passthrough_en;
 
   fetch  #(
-    .RESET_ADDR(32'h00000000)
+    .RESET_ADDR(32'h00000000),
+    .RAS_ENTRIES(32)
   ) fetch (
     .i_clk(i_clk),
     .i_rst(i_rst),
     .halt(keep_halting),
     
-    .target_pc(id_ex_next_pc),
-    .is_jump_or_branch(is_jump_or_branch),
+    .branch_corrected_target(id_ex_next_pc),
+    .branch_jumped_branched_pc(id_pc),
+    
+    .branch_recovery_pc(id_ex_next_pc),
+    .branch_recovery_needed(branch_recovery_needed),
+    
+    .branch_is_updated(id_valid & cu_passthrough_en & (is_branch_instr | is_jump_instr)),
+    .branch_update_taken(is_jump_or_branch_taken),
+    
+    .is_branch_instr(is_branch_instr),
+    .is_jal_instr(id_instr[6:0] == 7'b110_1111),
+    .is_jalr_instr(id_instr[6:0] == 7'b110_0111),
+    
     .pc_write_en(pc_write_en),
     .i_imem_ready(ifetch_ready),
+    .if_id_buffer_full(if_id_buffer_full),
     
+    .jump_rd_raddr(id_instr[11:7]),
+    .jump_rs1_raddr(id_instr[19:15]),
+    
+    .i_ras_restore_stack(i_ras_restore_stack),
+    .i_ras_restore_ptr(i_ras_restore_ptr),
+    .i_ras_restore_is_empty(i_ras_restore_is_empty),
+    
+    .predict_is_taken(if_predict_is_taken),
+    .predicted_pc(if_predicted_pc),
+    .predicted_target_pc(if_predicted_target_pc),
+
     .pc(if_pc),
     .pc_plus_4(if_pc_plus_4),
-    .o_imem_ren(ifetch_req_ren)
+    .o_imem_ren(ifetch_req_ren),
+    
+    .o_ras_current_stack(o_ras_current_stack),
+    .o_ras_current_ptr(o_ras_current_ptr),
+    .o_ras_current_is_empty(o_ras_current_is_empty)
   );
 	
 	wire dmem_stall;
@@ -355,10 +418,6 @@ module hart #(
   wire        if_flush;
   wire        if_id_write_en;
   wire [31:0] if_id_instr = icache_rdata;
-
-  wire id_valid; // 3/25 UPDATE
-  wire if_id_buffer_full;
-  wire if_id_buffer_empty;
 
   if_id_registers #(
     .NOP_INSTRUCTION(32'h00000013)
@@ -374,12 +433,28 @@ module hart #(
     .i_instr(if_id_instr),
     .i_pc(if_pc),
     .i_imem_valid(ifetch_resp_valid),
-
+    
+    .i_ras_restore_stack(o_ras_current_stack),
+    .i_ras_restore_ptr(o_ras_current_ptr),
+    .i_ras_restore_is_empty(o_ras_current_is_empty),
+    
+    .i_predict_is_taken(if_predict_is_taken),
+    .i_predicted_pc(if_predicted_pc),
+    .i_predicted_target_pc(if_predicted_target_pc),
+    
     .o_instr(id_instr),
     .o_pc(id_pc),
     .o_valid(id_valid),  // 3/25 UPDATE: out to decode
     .o_buffer_empty(if_id_buffer_empty),
-    .o_buffer_full(if_id_buffer_full)
+    .o_buffer_full(if_id_buffer_full),
+    
+    .o_ras_restore_stack(i_ras_restore_stack),
+    .o_ras_restore_ptr(i_ras_restore_ptr),
+    .o_ras_restore_is_empty(i_ras_restore_is_empty),
+    
+    .o_predict_is_taken(id_predict_is_taken),
+    .o_predicted_pc(id_predicted_pc),
+    .o_predicted_target_pc(id_predicted_target_pc)
   );
   
   // id_instr, id_pc, id_ex_next_pc, are all defined earlier
@@ -402,9 +477,6 @@ module hart #(
   wire        id_reg_write_en;
   wire [ 1:0] id_register_write_sel;
   
-  // if_id_write_en is defined earlier
-  // pc_write_en is defined earlier
-  wire        cu_passthrough_en;
   
   // if_flush is defined earlier
   wire        id_flush;
@@ -446,6 +518,7 @@ module hart #(
     
     .icache_busy(icache_busy),
     .dcache_busy(dcache_busy),
+    
     .instr_buffer_empty(if_id_buffer_empty),
     .instr_buffer_full(if_id_buffer_full),
     
@@ -467,15 +540,15 @@ module hart #(
     
     .writeback_data(writeback_data),
     
+    .is_jump_or_branch_taken_prediction(id_predict_is_taken),
+    .predicted_pc(id_predicted_pc),
     .keep_halting(keep_halting),
 
-
-//    .o_instr(id_ex_instr),
-//    .o_pc(id_ex_pc),
     .o_next_pc(id_ex_next_pc),
-    .o_is_jump(is_jump),
-    .o_is_branch(is_branch),
-    .o_is_jump_or_branch(is_jump_or_branch),
+    .o_is_jump_instr(is_jump_instr),
+    .o_is_branch_instr(is_branch_instr),
+    .o_is_jump_or_branch_taken(is_jump_or_branch_taken),
+    .o_branch_recovery_needed(branch_recovery_needed),
 
     // Register data
     .rs1_data(id_rs1_data),

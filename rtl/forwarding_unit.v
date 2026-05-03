@@ -22,8 +22,8 @@
 
 module forwarding_unit(
     input wire  [ 9:0]      if_id_rs,
-    input wire              is_jump,
-    input wire              is_branch,
+    input wire              is_jump_instr,
+    input wire              is_branch_instr,
     
     input wire  [31:0]      id_ex_instr,
     input wire  [31:0]      id_ex_pc,
@@ -84,10 +84,10 @@ module forwarding_unit(
     
     // Selector line logic
     always @(*) begin
-      id_forward_sel[0] <= (is_jump | is_branch) 
+      id_forward_sel[0] <= (is_jump_instr | is_branch_instr) 
                             & (if_id_rs[4:0] != 5'd0)
                             & ((if_id_rs[4:0] == ex_mem_rd) | (if_id_rs[4:0] == mem_wb_rd));
-      id_forward_sel[1] <= (is_jump | is_branch)  // 3/25 UPDATE: added '| is_branch'
+      id_forward_sel[1] <= (is_jump_instr | is_branch_instr)  // 3/25 UPDATE: added '| is_branch_instr'
                             & (if_id_rs[9:5] != 5'd0)
                             & ((if_id_rs[9:5] == ex_mem_rd) | (if_id_rs[9:5] == mem_wb_rd));       
       

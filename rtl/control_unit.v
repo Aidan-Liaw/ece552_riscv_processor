@@ -169,7 +169,7 @@ module control_unit (
             imm_format = 6'b100000;
             jump = 1'b1;
             write_reg_sel = 2'b01;
-            if_flush = 1'b1;
+            if_flush = 1'b0;
           end
     
           // jalr
