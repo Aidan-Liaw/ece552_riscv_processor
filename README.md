@@ -1,2 +1,2 @@
 # ece552_riscv_processor
-The repo of akliaw (9089292669), [ADDD OTHER NAMES] for ECE/COMP SCI 552.
+The repo of Aidan Liaw, Daphne Han, and Abby Wilson for ECE/COMP SCI 552.
